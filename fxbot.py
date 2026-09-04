@@ -2,7 +2,7 @@ import time
 import requests
 import yfinance as yf
 import pandas as pd
-import numpy as np
+import pandas_ta as ta
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAHk1_s827dXmN..."  # Apna poora token verify karein
