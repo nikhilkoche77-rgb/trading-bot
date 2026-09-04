@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 
 # --- TELEGRAM CONFIG ---
-TELEGRAM_TOKEN = "8991028193:AAHk1_s827dXmN..."  # Apna poora token verify karein
+TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"  # Apna poora token verify karein
 CHAT_ID = "1345385952"
 
 # "SCALP" (1m) | "SWING" (1h) | "POSITION" (1d)
