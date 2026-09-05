@@ -1,4 +1,5 @@
 import time
+import threading
 import requests
 import yfinance as yf
 import pandas as pd
@@ -6,7 +7,7 @@ import numpy as np
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
-CHAT_ID = "1345385952"
+MY_CHAT_ID = "1345385952"  # Sirf aapka ID (Admin)
 
 CURRENT_MODE = "SCALP"
 
@@ -44,11 +45,64 @@ SYMBOLS = {
     "Silver": "SI=F"
 }
 
-# Active position tracker for ATR Trailing SL
 active_positions = {
     name: {"side": None, "entry": 0.0, "sl": 0.0, "best_price": 0.0, "atr": 0.0} 
     for name in SYMBOLS
 }
+
+def send_telegram(message, chat_id=MY_CHAT_ID):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Telegram error: {e}")
+
+# --- INCOMING TELEGRAM LISTENER (REPLY SYSTEM) ---
+def telegram_listener():
+    last_update_id = 0
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+            params = {"offset": last_update_id + 1, "timeout": 20}
+            resp = requests.get(url, params=params, timeout=25).json()
+
+            if "result" in resp:
+                for update in resp["result"]:
+                    last_update_id = update["update_id"]
+                    if "message" in update and "text" in update["message"]:
+                        msg_text = update["message"]["text"].strip()
+                        sender_id = str(update["message"]["chat"]["id"])
+                        user_name = update["message"]["from"].get("first_name", "Trader")
+
+                        # Case 1: Aapka personal access (Admin)
+                        if sender_id == MY_CHAT_ID:
+                            if msg_text == "/start" or msg_text.lower() == "status":
+                                reply = (
+                                    f"👋 *Welcome Boss ({user_name})!*\n\n"
+                                    f"🤖 *System Status:* `Online 24/7`\n"
+                                    f"⚙️ *Current Mode:* `{CFG['label']}`\n"
+                                    f"📊 *Assets Monitored:* `{len(SYMBOLS)} Pairs`\n"
+                                    f"🛡️ *Trailing SL:* `Active`\n\n"
+                                    f"Market scan background me chal raha hai. Jaise hi valid setup banega, signal instant trigger ho jayega."
+                                )
+                                send_telegram(reply, chat_id=sender_id)
+                            else:
+                                send_telegram(f"🤖 Bot is running! Type `/start` for status.", chat_id=sender_id)
+
+                        # Case 2: Koi random unknown user start kare
+                        else:
+                            reply = (
+                                f"Hello {user_name}! 👋\n\n"
+                                f"⚠️ *Private Algorithmic Trading Bot*\n"
+                                f"Yeh bot ek private automated server par configured hai. Public access filhal disabled hai.\n\n"
+                                f"🔒 *Access Status:* Restricted"
+                            )
+                            send_telegram(reply, chat_id=sender_id)
+
+        except Exception as e:
+            print(f"Listener error: {e}")
+        time.sleep(1)
 
 def calculate_atr_and_adx(df, length=14):
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
@@ -74,14 +128,6 @@ def calculate_atr_and_adx(df, length=14):
     adx = dx.rolling(length).mean()
     return atr, adx
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
 def get_higher_timeframe_trend(ticker_symbol):
     try:
         htf_data = yf.download(ticker_symbol, period=CFG["htf_period"], interval=CFG["htf_interval"], progress=False)
@@ -105,8 +151,7 @@ def get_higher_timeframe_trend(ticker_symbol):
         elif (last_close < last_ema50) and (last_ema50 < last_ema200):
             return "BEARISH"
         return "NEUTRAL"
-    except Exception as e:
-        print(f"HTF Error: {e}")
+    except Exception:
         return "NEUTRAL"
 
 def manage_trailing_sl(name, curr_price):
@@ -114,9 +159,7 @@ def manage_trailing_sl(name, curr_price):
     if pos["side"] is None:
         return
 
-    # ATR Trailing multiplier
-    multiplier = 1.5
-    trailing_gap = pos["atr"] * multiplier
+    trailing_gap = pos["atr"] * 1.5
 
     if pos["side"] == "BUY":
         if curr_price > pos["best_price"]:
@@ -173,7 +216,6 @@ def check_market(name, ticker_symbol):
         swing_h = float(df['swing_high'].iloc[-1])
         swing_l = float(df['swing_low'].iloc[-1])
 
-        # Trailing SL Live Check
         manage_trailing_sl(name, curr_price)
 
         print(f"[{CURRENT_MODE}] {name:<14} | Price: {curr_price:<9.2f} | ADX: {curr_adx:.1f} | ATR: {curr_atr:.2f} | HTF: {htf_trend}")
@@ -188,13 +230,7 @@ def check_market(name, ticker_symbol):
             risk = curr_price - sl
 
             if risk > 0:
-                active_positions[name] = {
-                    "side": "BUY",
-                    "entry": curr_price,
-                    "sl": sl,
-                    "best_price": curr_price,
-                    "atr": curr_atr
-                }
+                active_positions[name] = {"side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
                     f"🚀 *{CFG['label']} BUY ALERT*\n\n"
                     f"🪙 *Asset:* `{name}`\n"
@@ -218,13 +254,7 @@ def check_market(name, ticker_symbol):
             risk = sl - curr_price
 
             if risk > 0:
-                active_positions[name] = {
-                    "side": "SELL",
-                    "entry": curr_price,
-                    "sl": sl,
-                    "best_price": curr_price,
-                    "atr": curr_atr
-                }
+                active_positions[name] = {"side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
                     f"⚠️ *{CFG['label']} SELL ALERT*\n\n"
                     f"🪙 *Asset:* `{name}`\n"
@@ -244,8 +274,12 @@ def check_market(name, ticker_symbol):
     except Exception as e:
         print(f"Error on {name}: {e}")
 
-print("Pro Bot Online...")
-send_telegram("🔥 *Pro Strategy Live!*\n• 15M HTF Confluence\n• 1M Micro Breakout\n• Dynamic ATR Trailing SL")
+# Separate background thread for incoming messages
+listener_thread = threading.Thread(target=telegram_listener, daemon=True)
+listener_thread.start()
+
+print("Auto-Reply & Scanner Live...")
+send_telegram("🔥 *Bot Updated with Auto-Reply & Access Security!*\nSend /start to test.")
 
 while True:
     for name, ticker in SYMBOLS.items():
