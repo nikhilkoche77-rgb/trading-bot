@@ -1,17 +1,12 @@
 import time
-import threading
 import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from g4f.client import Client
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 MY_CHAT_ID = "1345385952"
-
-# Free AI Client (No Key, No Payment Needed)
-ai_client = Client()
 
 CURRENT_MODE = "SCALP"
 
@@ -54,82 +49,13 @@ active_positions = {
     for name in SYMBOLS
 }
 
-def send_telegram(message, chat_id=MY_CHAT_ID):
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
+    payload = {"chat_id": MY_CHAT_ID, "text": message}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Telegram error: {e}")
-
-# --- 100% FREE AI TRADING BRAIN ---
-def get_free_ai_trading_reply(user_question):
-    sys_prompt = (
-        "You are an expert Wall Street Algorithmic Trader. "
-        "Reply only to technical analysis, indicators, stock market, forex, crypto, and trading strategy questions in simple natural Hinglish. "
-        "Keep answers concise (max 3-4 bullet points). If the question is not about finance/trading, decline politely."
-    )
-    try:
-        response = ai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_question}
-            ],
-            web_search=False
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Free AI Error: {e}")
-        return "Filhal AI engine processing me hai, kripya 1 minute baad dobara sawal bhejein."
-
-# --- TELEGRAM INCOMING LISTENER ---
-def telegram_listener():
-    last_update_id = 0
-    while True:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-            params = {"offset": last_update_id + 1, "timeout": 20}
-            resp = requests.get(url, params=params, timeout=25).json()
-
-            if "result" in resp:
-                for update in resp["result"]:
-                    last_update_id = update["update_id"]
-                    if "message" in update and "text" in update["message"]:
-                        msg_text = update["message"]["text"].strip()
-                        sender_id = str(update["message"]["chat"]["id"])
-                        user_name = update["message"]["from"].get("first_name", "Trader")
-
-                        print(f"Query from {user_name}: {msg_text}")
-
-                        # Admin Command
-                        if sender_id == MY_CHAT_ID and msg_text in ["/start", "status"]:
-                            reply = (
-                                f"👋 Welcome Boss ({user_name})!\n\n"
-                                f"🤖 System Status: Online 24/7\n"
-                                f"⚙️ Mode: {CFG['label']}\n"
-                                f"📊 Monitored: {len(SYMBOLS)} Pairs\n"
-                                f"🧠 Free AI Trading Assistant: Active"
-                            )
-                            send_telegram(reply, chat_id=sender_id)
-
-                        # Public / Any Trading Query
-                        else:
-                            if msg_text == "/start":
-                                welcome_msg = (
-                                    f"Hello {user_name}! 👋\n\n"
-                                    f"Main ek AI Trading Assistant aur Quantitative Engine hoon. "
-                                    f"Aap mujhse Trading, Indicators, Risk Management, ya Price Action "
-                                    f"se juda koi bhi sawal pooch sakte hain!"
-                                )
-                                send_telegram(welcome_msg, chat_id=sender_id)
-                            else:
-                                ai_reply = get_free_ai_trading_reply(msg_text)
-                                send_telegram(ai_reply, chat_id=sender_id)
-
-        except Exception as e:
-            print(f"Listener error: {e}")
-        time.sleep(1)
 
 def calculate_atr_and_adx(df, length=14):
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
@@ -248,7 +174,7 @@ def check_market(name, ticker_symbol):
         strong_trend = curr_adx > CFG["adx_min"]
         active_pos = active_positions[name]["side"]
 
-        # BUY SETUP
+        # BUY SIGNAL
         if (active_pos is None) and (htf_trend == "BULLISH") and strong_trend and (curr_ema50 > curr_ema93) and (curr_price > swing_h) and (curr_price > curr_open):
             atr_sl = curr_price - (curr_atr * 1.5)
             sl = max(swing_l, atr_sl)
@@ -257,22 +183,21 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"🚀 {CFG['label']} BUY ALERT\n\n"
+                    f"🚀 {CFG['label']} BUY SIGNAL\n\n"
                     f"🪙 Asset: {name}\n"
-                    f"📈 HTF Trend: 15M Bullish\n"
+                    f"📈 HTF Trend: 15M Bullish Verified\n"
                     f"💵 Entry: {curr_price:.2f}\n"
-                    f"🛑 Dynamic SL: {sl:.2f}\n"
-                    f"📊 ATR: {curr_atr:.2f}\n\n"
+                    f"🛑 Stop Loss: {sl:.2f}\n\n"
                     f"🎯 TARGETS:\n"
-                    f"• TP 1: {curr_price + (risk * 1.5):.2f}\n"
-                    f"• TP 2: {curr_price + (risk * 2.0):.2f}\n"
-                    f"• TP 3: {curr_price + (risk * 3.0):.2f}\n"
-                    f"• TP 4: {curr_price + (risk * 5.0):.2f}\n\n"
-                    f"⚡ ADX: {curr_adx:.1f}"
+                    f"• TP 1 (1:1.5): {curr_price + (risk * 1.5):.2f}\n"
+                    f"• TP 2 (1:2.0): {curr_price + (risk * 2.0):.2f}\n"
+                    f"• TP 3 (1:3.0): {curr_price + (risk * 3.0):.2f}\n"
+                    f"• TP 4 (1:5.0): {curr_price + (risk * 5.0):.2f}\n\n"
+                    f"⚡ ADX Strength: {curr_adx:.1f}"
                 )
                 send_telegram(msg)
 
-        # SELL SETUP
+        # SELL SIGNAL
         elif (active_pos is None) and (htf_trend == "BEARISH") and strong_trend and (curr_ema50 < curr_ema93) and (curr_price < swing_l) and (curr_price < curr_open):
             atr_sl = curr_price + (curr_atr * 1.5)
             sl = min(swing_h, atr_sl)
@@ -281,30 +206,25 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"⚠️ {CFG['label']} SELL ALERT\n\n"
+                    f"⚠️ {CFG['label']} SELL SIGNAL\n\n"
                     f"🪙 Asset: {name}\n"
-                    f"📉 HTF Trend: 15M Bearish\n"
+                    f"📉 HTF Trend: 15M Bearish Verified\n"
                     f"💵 Entry: {curr_price:.2f}\n"
-                    f"🛑 Dynamic SL: {sl:.2f}\n"
-                    f"📊 ATR: {curr_atr:.2f}\n\n"
+                    f"🛑 Stop Loss: {sl:.2f}\n\n"
                     f"🎯 TARGETS:\n"
-                    f"• TP 1: {curr_price - (risk * 1.5):.2f}\n"
-                    f"• TP 2: {curr_price - (risk * 2.0):.2f}\n"
-                    f"• TP 3: {curr_price - (risk * 3.0):.2f}\n"
-                    f"• TP 4: {curr_price - (risk * 5.0):.2f}\n\n"
-                    f"⚡ ADX: {curr_adx:.1f}"
+                    f"• TP 1 (1:1.5): {curr_price - (risk * 1.5):.2f}\n"
+                    f"• TP 2 (1:2.0): {curr_price - (risk * 2.0):.2f}\n"
+                    f"• TP 3 (1:3.0): {curr_price - (risk * 3.0):.2f}\n"
+                    f"• TP 4 (1:5.0): {curr_price - (risk * 5.0):.2f}\n\n"
+                    f"⚡ ADX Strength: {curr_adx:.1f}"
                 )
                 send_telegram(msg)
 
     except Exception as e:
         print(f"Error on {name}: {e}")
 
-# Run Free AI Listener
-listener_thread = threading.Thread(target=telegram_listener, daemon=True)
-listener_thread.start()
-
-print("Zero-Cost AI Scanner Live...")
-send_telegram("🔥 Zero-Cost Free AI Engine Live 24/7!")
+print("Pure Signal Scanner Online...")
+send_telegram("🔥 Pure Signal Engine Live! Market scanning active...")
 
 while True:
     for name, ticker in SYMBOLS.items():
