@@ -23,8 +23,8 @@ COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
 # --- STRICT RISK MANAGEMENT (Rs. 1,000 CAPITAL GUARD) ---
 TRADE_INR_ALLOCATION = 110.0  # ₹110 per trade
-MAX_PARALLEL_TRADES = 2       # Maximum ₹220 engaged
-DAILY_MAX_LOSS = 30.0         # ₹30 loss par auto kill-switch
+MAX_PARALLEL_TRADES = 2       # Maximum 2 concurrent trades (~₹220 engaged)
+DAILY_MAX_LOSS = 30.0         # ₹30 loss par din bhar ke liye trading band
 
 STATE_FILE = "trades_state.json"
 is_paused = False
@@ -65,23 +65,32 @@ def save_state(state):
 
 active_positions = load_state()
 
-# --- TELEGRAM CONTROLS ---
+# --- TELEGRAM CONTROLS & DYNAMIC SELL BUTTONS ---
 def get_control_keyboard():
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "📊 Live Status", "callback_data": "cmd_status"},
-                {"text": "💰 INR Wallet", "callback_data": "cmd_balance"}
-            ],
-            [
-                {"text": "⏸️ Pause Engine", "callback_data": "cmd_pause"},
-                {"text": "▶️ Resume Engine", "callback_data": "cmd_resume"}
-            ],
-            [
-                {"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_close_all"}
-            ]
+    keyboard = [
+        [
+            {"text": "📊 Live Status", "callback_data": "cmd_status"},
+            {"text": "💰 INR Wallet", "callback_data": "cmd_balance"}
         ]
-    }
+    ]
+
+    # Dynamically generate a separate SELL button for each active trade
+    active_sells = []
+    for p_name, pos in active_positions.items():
+        if pos["side"] is not None:
+            coin_code = p_name.split("/")[0]
+            active_sells.append({"text": f"🔴 Sell {coin_code}", "callback_data": f"sell_{p_name}"})
+
+    if active_sells:
+        keyboard.append(active_sells)
+
+    keyboard.append([
+        {"text": "⏸️ Pause Engine", "callback_data": "cmd_pause"},
+        {"text": "▶️ Resume Engine", "callback_data": "cmd_resume"}
+    ])
+    keyboard.append([{"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_close_all"}])
+
+    return {"inline_keyboard": keyboard}
 
 def send_telegram(message, chat_id=None, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -102,7 +111,7 @@ def answer_callback_query(callback_query_id, text=None):
     except Exception:
         pass
 
-# --- COINDCX AUTH & EXECUTION ---
+# --- COINDCX API EXECUTION ---
 def coindcx_auth_post(endpoint, body):
     timeStamp = int(round(time.time() * 1000))
     body["timestamp"] = timeStamp
@@ -133,10 +142,8 @@ def place_coindcx_order(market_pair, side, quantity):
     success, resp = coindcx_auth_post("/exchange/v1/orders/create", body)
     if success and "orders" in resp:
         order_id = resp["orders"][0].get("id")
-        # Quick verification
         time.sleep(1.5)
-        check_body = {"id": order_id}
-        ok, detail = coindcx_auth_post("/exchange/v1/orders/status", check_body)
+        ok, detail = coindcx_auth_post("/exchange/v1/orders/status", {"id": order_id})
         if ok and detail.get("status") in ["filled", "open"]:
             return True, resp
     return success, resp
@@ -209,7 +216,7 @@ def generate_status_text(user_name="Trader"):
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"CURRENT POSITIONS:{pos_summary}\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"Instant Touch Controls:"
+        f"Touch any button below to manage:"
     )
 
 # --- TRADE EXECUTION & TRAILING ENGINE ---
@@ -227,9 +234,9 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
     if curr_price >= (pos["entry"] + pos["atr"]) and pos["sl"] < pos["entry"]:
         pos["sl"] = pos["entry"]
         save_state(active_positions)
-        send_telegram(f"🛡️ BREAKEVEN ACTIVATED\nPair: {name}\nSL locked to entry: ₹{pos['entry']:.4f}")
+        send_telegram(f"🛡️ BREAKEVEN ACTIVATED\nPair: {name}\nSL moved to Entry: ₹{pos['entry']:.4f}")
 
-    # Trailing SL Ladder
+    # Trailing Stop Loss
     if curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
         new_sl = curr_price - trailing_gap
@@ -242,11 +249,12 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
             trade_pnl = (curr_price - pos["entry"]) * qty
             daily_realized_pnl += trade_pnl
             send_telegram(
-                f"🛑 TRADE EXITED\n"
+                f"🛑 AUTO-EXIT (SL/Target Hit)\n\n"
                 f"Pair: {coindcx_pair}\n"
                 f"Exit Price: ₹{curr_price:.4f}\n"
                 f"Units: {qty}\n"
-                f"Realized PnL: ₹{trade_pnl:.2f}",
+                f"Realized PnL: ₹{trade_pnl:.2f}\n"
+                f"Amount credited to CoinDCX Wallet.",
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
@@ -311,7 +319,7 @@ def midnight_reset_scheduler():
         next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
         time.sleep((next_run - now).total_seconds())
 
-        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL: ₹{daily_realized_pnl:.2f}\nResetting daily loss counter to ₹0.00."
+        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL: ₹{daily_realized_pnl:.2f}\nDaily drawdown lock reset to ₹0.00."
         send_telegram(report)
         daily_realized_pnl = 0.0
 
@@ -338,21 +346,44 @@ def handle_incoming_users():
                                 answer_callback_query(cb["id"], "Status Updated")
                                 send_telegram(generate_status_text(u_name), chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_balance":
-                                answer_callback_query(cb["id"], "Balance Fetched")
+                                answer_callback_query(cb["id"], "Wallet Checked")
                                 bal = get_coindcx_balance()
                                 send_telegram(f"💰 CoinDCX Live Wallet: ₹{bal:.2f} INR", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_pause":
                                 is_paused = True
-                                answer_callback_query(cb["id"], "Trading Paused")
+                                answer_callback_query(cb["id"], "Paused")
                                 send_telegram("⏸️ Bot Paused. New entries locked.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_resume":
                                 is_paused = False
-                                answer_callback_query(cb["id"], "Trading Resumed")
+                                answer_callback_query(cb["id"], "Resumed")
                                 send_telegram("▶️ Bot Active. Scanning high-volatility pairs.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_close_all":
                                 answer_callback_query(cb["id"], "Exiting All")
                                 count = emergency_close_all()
                                 send_telegram(f"🚨 Panic Close: Exited {count} positions at market price.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                            elif cb_data.startswith("sell_"):
+                                target_pair = cb_data.replace("sell_", "")
+                                if target_pair in active_positions and active_positions[target_pair]["side"] is not None:
+                                    pos = active_positions[target_pair]
+                                    pair_code = SYMBOLS[target_pair]["coindcx"]
+                                    success, _ = place_coindcx_order(pair_code, "sell", pos["qty"])
+                                    if success:
+                                        recvd_inr = pos["best_price"] * pos["qty"]
+                                        answer_callback_query(cb["id"], f"Sold {target_pair}!")
+                                        send_telegram(
+                                            f"✅ MANUAL SELL EXECUTED\n\n"
+                                            f"🪙 Pair: {target_pair}\n"
+                                            f"📦 Units Sold: {pos['qty']}\n"
+                                            f"💵 Est. Return: ₹{recvd_inr:.2f} credited to CoinDCX INR Wallet.",
+                                            chat_id=sender_id,
+                                            reply_markup=get_control_keyboard()
+                                        )
+                                        pos["side"] = None
+                                        save_state(active_positions)
+                                    else:
+                                        answer_callback_query(cb["id"], "Sell Failed!")
+                                else:
+                                    answer_callback_query(cb["id"], "Position already closed!")
 
                     elif "message" in update and "text" in update["message"]:
                         sender_id = str(update["message"]["chat"]["id"])
@@ -368,7 +399,7 @@ threading.Thread(target=handle_incoming_users, daemon=True).start()
 threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
 
 print("Master CoinDCX Institutional Engine Online...")
-send_telegram("🔥 Master CoinDCX Institutional Engine Armed!\nDirect CoinDCX API Feed + Micro-Risk Controls Active.", reply_markup=get_control_keyboard())
+send_telegram("🔥 Master CoinDCX Institutional Engine Armed!\nInteractive Sell Buttons & Risk Guard Active.", reply_markup=get_control_keyboard())
 
 # Main Scan Cycle
 while True:
