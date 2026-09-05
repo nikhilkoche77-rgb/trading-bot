@@ -1,4 +1,5 @@
 import time
+import threading
 import requests
 import yfinance as yf
 import pandas as pd
@@ -6,7 +7,7 @@ import numpy as np
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
-MY_CHAT_ID = "1345385952"
+MY_CHAT_ID = "1345385952"  # Sirf aapko signals aayenge
 
 CURRENT_MODE = "SCALP"
 
@@ -49,13 +50,52 @@ active_positions = {
     for name in SYMBOLS
 }
 
-def send_telegram(message):
+def send_telegram(message, chat_id=MY_CHAT_ID):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": MY_CHAT_ID, "text": message}
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Telegram error: {e}")
+
+# --- AUTO BLOCK / NOTICE FOR RANDOM USERS ---
+def handle_incoming_users():
+    last_update_id = 0
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+            params = {"offset": last_update_id + 1, "timeout": 20}
+            resp = requests.get(url, params=params, timeout=25).json()
+
+            if "result" in resp:
+                for update in resp["result"]:
+                    last_update_id = update["update_id"]
+                    if "message" in update and "text" in update["message"]:
+                        sender_id = str(update["message"]["chat"]["id"])
+                        user_name = update["message"]["from"].get("first_name", "Trader")
+
+                        # Agar aap message karein (/start)
+                        if sender_id == MY_CHAT_ID:
+                            send_telegram(
+                                f"👑 *Admin Verified ({user_name})*\n\n"
+                                f"🤖 Engine Status: `Active 24/7`\n"
+                                f"⚡ Mode: `{CFG['label']}`\n"
+                                f"📡 Market Scan Running...",
+                                chat_id=sender_id
+                            )
+                        # Agar koi anjaan user message kare
+                        else:
+                            public_notice = (
+                                f"Hello {user_name}! 👋\n\n"
+                                f"⚠️ *Private Algorithmic Trading Signal Engine*\n"
+                                f"Live signals are strictly restricted to authorized administrator accounts.\n\n"
+                                f"🔒 *Access:* Closed"
+                            )
+                            send_telegram(public_notice, chat_id=sender_id)
+
+        except Exception as e:
+            print(f"Listener issue: {e}")
+        time.sleep(2)
 
 def calculate_atr_and_adx(df, length=14):
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
@@ -120,9 +160,9 @@ def manage_trailing_sl(name, curr_price):
             new_sl = curr_price - trailing_gap
             if new_sl > pos["sl"]:
                 pos["sl"] = new_sl
-                send_telegram(f"🛡️ TRAILING SL UPDATED (BUY)\n🪙 Asset: {name}\n📈 High: {pos['best_price']:.2f}\n🛑 New SL: {pos['sl']:.2f}")
+                send_telegram(f"🛡️ *TRAILING SL UPDATED (BUY)*\n🪙 Asset: `{name}`\n📈 High: `{pos['best_price']:.2f}`\n🛑 New SL: `{pos['sl']:.2f}`")
         elif curr_price <= pos["sl"]:
-            send_telegram(f"🔴 EXIT HIT (STOP LOSS)\n🪙 Asset: {name}\n💵 Exit: {curr_price:.2f}\n🛑 SL Hit: {pos['sl']:.2f}")
+            send_telegram(f"🔴 *EXIT HIT (STOP LOSS)*\n🪙 Asset: `{name}`\n💵 Exit: `{curr_price:.2f}`\n🛑 SL Hit: `{pos['sl']:.2f}`")
             pos["side"] = None
 
     elif pos["side"] == "SELL":
@@ -131,9 +171,9 @@ def manage_trailing_sl(name, curr_price):
             new_sl = curr_price + trailing_gap
             if new_sl < pos["sl"]:
                 pos["sl"] = new_sl
-                send_telegram(f"🛡️ TRAILING SL UPDATED (SELL)\n🪙 Asset: {name}\n📉 Low: {pos['best_price']:.2f}\n🛑 New SL: {pos['sl']:.2f}")
+                send_telegram(f"🛡️ *TRAILING SL UPDATED (SELL)*\n🪙 Asset: `{name}`\n📉 Low: `{pos['best_price']:.2f}`\n🛑 New SL: `{pos['sl']:.2f}`")
         elif curr_price >= pos["sl"]:
-            send_telegram(f"🔴 EXIT HIT (STOP LOSS)\n🪙 Asset: {name}\n💵 Exit: {curr_price:.2f}\n🛑 SL Hit: {pos['sl']:.2f}")
+            send_telegram(f"🔴 *EXIT HIT (STOP LOSS)*\n🪙 Asset: `{name}`\n💵 Exit: `{curr_price:.2f}`\n🛑 SL Hit: `{pos['sl']:.2f}`")
             pos["side"] = None
 
 def check_market(name, ticker_symbol):
@@ -183,17 +223,17 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"🚀 {CFG['label']} BUY SIGNAL\n\n"
-                    f"🪙 Asset: {name}\n"
-                    f"📈 HTF Trend: 15M Bullish Verified\n"
-                    f"💵 Entry: {curr_price:.2f}\n"
-                    f"🛑 Stop Loss: {sl:.2f}\n\n"
-                    f"🎯 TARGETS:\n"
-                    f"• TP 1 (1:1.5): {curr_price + (risk * 1.5):.2f}\n"
-                    f"• TP 2 (1:2.0): {curr_price + (risk * 2.0):.2f}\n"
-                    f"• TP 3 (1:3.0): {curr_price + (risk * 3.0):.2f}\n"
-                    f"• TP 4 (1:5.0): {curr_price + (risk * 5.0):.2f}\n\n"
-                    f"⚡ ADX Strength: {curr_adx:.1f}"
+                    f"🚀 *{CFG['label']} BUY SIGNAL*\n\n"
+                    f"🪙 *Asset:* `{name}`\n"
+                    f"📈 *HTF Trend:* `15M Bullish Verified`\n"
+                    f"💵 *Entry:* `{curr_price:.2f}`\n"
+                    f"🛑 *Stop Loss:* `{sl:.2f}`\n\n"
+                    f"🎯 *TARGETS:*\n"
+                    f"• TP 1 (1:1.5): `{curr_price + (risk * 1.5):.2f}`\n"
+                    f"• TP 2 (1:2.0): `{curr_price + (risk * 2.0):.2f}`\n"
+                    f"• TP 3 (1:3.0): `{curr_price + (risk * 3.0):.2f}`\n"
+                    f"• TP 4 (1:5.0): `{curr_price + (risk * 5.0):.2f}`\n\n"
+                    f"⚡ *ADX Strength:* `{curr_adx:.1f}`"
                 )
                 send_telegram(msg)
 
@@ -206,25 +246,28 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"⚠️ {CFG['label']} SELL SIGNAL\n\n"
-                    f"🪙 Asset: {name}\n"
-                    f"📉 HTF Trend: 15M Bearish Verified\n"
-                    f"💵 Entry: {curr_price:.2f}\n"
-                    f"🛑 Stop Loss: {sl:.2f}\n\n"
-                    f"🎯 TARGETS:\n"
-                    f"• TP 1 (1:1.5): {curr_price - (risk * 1.5):.2f}\n"
-                    f"• TP 2 (1:2.0): {curr_price - (risk * 2.0):.2f}\n"
-                    f"• TP 3 (1:3.0): {curr_price - (risk * 3.0):.2f}\n"
-                    f"• TP 4 (1:5.0): {curr_price - (risk * 5.0):.2f}\n\n"
-                    f"⚡ ADX Strength: {curr_adx:.1f}"
+                    f"⚠️ *{CFG['label']} SELL SIGNAL*\n\n"
+                    f"🪙 *Asset:* `{name}`\n"
+                    f"📉 *HTF Trend:* `15M Bearish Verified`\n"
+                    f"💵 *Entry:* `{curr_price:.2f}`\n"
+                    f"🛑 *Stop Loss:* `{sl:.2f}`\n\n"
+                    f"🎯 *TARGETS:*\n"
+                    f"• TP 1 (1:1.5): `{curr_price - (risk * 1.5):.2f}`\n"
+                    f"• TP 2 (1:2.0): `{curr_price - (risk * 2.0):.2f}`\n"
+                    f"• TP 3 (1:3.0): `{curr_price - (risk * 3.0):.2f}`\n"
+                    f"• TP 4 (1:5.0): `{curr_price - (risk * 5.0):.2f}`\n\n"
+                    f"⚡ *ADX Strength:* `{curr_adx:.1f}`"
                 )
                 send_telegram(msg)
 
     except Exception as e:
         print(f"Error on {name}: {e}")
 
-print("Pure Signal Scanner Online...")
-send_telegram("🔥 Pure Signal Engine Live! Market scanning active...")
+# Start User Access Controller in Background
+threading.Thread(target=handle_incoming_users, daemon=True).start()
+
+print("Signal Engine Online...")
+send_telegram("🔥 *Pure Signal Engine 24/7 Live!*\nPrivate access locked. Scanning started...")
 
 while True:
     for name, ticker in SYMBOLS.items():
