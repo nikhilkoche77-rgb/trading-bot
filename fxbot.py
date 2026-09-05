@@ -21,18 +21,33 @@ ADMIN_CHAT_IDS = [
 COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
 COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
-# --- DUAL-ENGINE RISK PARAMETERS ---
-TRADE_INR_ALLOCATION = 110.0   # ₹110 per trade for INR pairs
-TRADE_USDT_ALLOCATION = 1.30   # ~$1.30 per trade for USDT pairs
+# --- RISK & COMPOUND ENGINE PARAMETERS ---
 MAX_PARALLEL_TRADES = 2        # Maximum 2 concurrent trades across all assets
 DAILY_MAX_LOSS_INR = 30.0      # ₹30 hard daily loss kill-switch
 COOL_OFF_MINUTES = 20          # 20-minute anti-whipsaw delay after SL hit
 MAX_SPREAD_TOLERANCE_PCT = 0.45 # Skip order if spread exceeds 0.45%
+MIN_ORDER_BOOK_IMBALANCE = 1.40 # Buyers must be 1.4x of sellers in top book
+
+# Dynamic Sizing Limits
+MIN_TRADE_INR = 110.0
+MAX_TRADE_INR = 300.0
+MIN_TRADE_USDT = 1.30
+MAX_TRADE_USDT = 3.50
+ALLOCATION_PCT = 0.10          # 10% of total wallet balance per trade
 
 STATE_FILE = "trades_state.json"
 is_paused = False
 daily_realized_pnl_inr = 0.0
 cool_off_tracker = {}
+
+# Performance Tracker Stats
+daily_stats = {
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "best_trade_pnl": 0.0,
+    "worst_trade_pnl": 0.0
+}
 
 # --- UNIFIED MULTI-ASSET PAIRS (CRYPTO + GOLD + FOREX SYNTHETICS) ---
 SYMBOLS = {
@@ -68,6 +83,15 @@ SYMBOLS = {
     "BONK/INR": {"base_curr": "INR", "binance": "BONKUSDT", "pair": "B-BONK_INR", "coindcx": "BONKINR", "step": 0},
     "RENDER/INR": {"base_curr": "INR", "binance": "RENDERUSDT", "pair": "B-RENDER_INR", "coindcx": "RENDERINR", "step": 2}
 }
+
+# --- DYNAMIC POSITION SIZING HELPER ---
+def get_dynamic_allocation(base_curr, inr_bal, usdt_bal):
+    if base_curr == "INR":
+        scaled = inr_bal * ALLOCATION_PCT
+        return max(MIN_TRADE_INR, min(scaled, MAX_TRADE_INR))
+    else:
+        scaled = usdt_bal * ALLOCATION_PCT
+        return max(MIN_TRADE_USDT, min(scaled, MAX_TRADE_USDT))
 
 # --- PERSISTENT STATE ---
 def load_state():
@@ -106,6 +130,7 @@ def get_control_keyboard():
         keyboard.append(active_sells)
 
     keyboard.append([
+        {"text": "📈 Daily Analytics", "callback_data": "cmd_analytics"},
         {"text": "⏸️ Pause Engine", "callback_data": "cmd_pause"},
         {"text": "▶️ Resume Engine", "callback_data": "cmd_resume"}
     ])
@@ -184,7 +209,40 @@ def emergency_close_all():
     save_state(active_positions)
     return closed_count
 
-# --- BTC MARKET HEALTH & SPREAD INSPECTION ---
+# --- ORDER BOOK SPREAD & DEPTH IMBALANCE ---
+def check_orderbook_metrics(pair_name):
+    """Checks both bid-ask spread tolerance and buyer vs seller volume imbalance."""
+    try:
+        url = f"https://public.coindcx.com/market_data/orderbook?pair={pair_name}"
+        r = requests.get(url, timeout=4).json()
+        bids = r.get("bids", {})
+        asks = r.get("asks", {})
+        if bids and asks:
+            bid_prices = sorted([float(p) for p in bids.keys()], reverse=True)
+            ask_prices = sorted([float(p) for p in asks.keys()])
+            best_bid = bid_prices[0]
+            best_ask = ask_prices[0]
+
+            if best_bid > 0:
+                spread_pct = ((best_ask - best_bid) / best_bid) * 100
+                if spread_pct > MAX_SPREAD_TOLERANCE_PCT:
+                    return False, "Spread too wide"
+
+            # Check Top-5 Depth Volume Imbalance
+            top_bids_vol = sum(float(bids[str(p)]) for p in bid_prices[:5] if str(p) in bids)
+            top_asks_vol = sum(float(asks[str(p)]) for p in ask_prices[:5] if str(p) in asks)
+
+            if top_asks_vol > 0:
+                imbalance_ratio = top_bids_vol / top_asks_vol
+                if imbalance_ratio < MIN_ORDER_BOOK_IMBALANCE:
+                    return False, f"Weak buyer volume ({imbalance_ratio:.2f}x)"
+
+            return True, "Passed"
+    except Exception:
+        pass
+    return True, "Bypass"
+
+# --- BTC MARKET HEALTH ---
 def is_btc_healthy():
     try:
         url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
@@ -204,22 +262,6 @@ def is_btc_healthy():
         return True
     except Exception:
         return True
-
-def check_market_spread(pair_name):
-    try:
-        url = f"https://public.coindcx.com/market_data/orderbook?pair={pair_name}"
-        r = requests.get(url, timeout=4).json()
-        bids = r.get("bids", {})
-        asks = r.get("asks", {})
-        if bids and asks:
-            best_bid = max(float(p) for p in bids.keys())
-            best_ask = min(float(p) for p in asks.keys())
-            if best_bid > 0:
-                spread_pct = ((best_ask - best_bid) / best_bid) * 100
-                return spread_pct <= MAX_SPREAD_TOLERANCE_PCT
-    except Exception:
-        pass
-    return True
 
 # --- BINANCE LEAD SIGNAL SCANNER ---
 def check_binance_lead_signal(symbol_binance):
@@ -277,6 +319,21 @@ def calculate_technical_indicators(df, length=14):
     adx = dx.rolling(length).mean()
     return atr, adx
 
+def generate_analytics_text():
+    total = daily_stats["total_trades"]
+    win_rate = (daily_stats["wins"] / total * 100) if total > 0 else 0.0
+    return (
+        f"📊 DAILY PERFORMANCE ANALYTICS\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🔢 Total Closed Trades: {total}\n"
+        f"✅ Wins: {daily_stats['wins']} | ❌ Losses: {daily_stats['losses']}\n"
+        f"🎯 Win Rate: {win_rate:.1f}%\n"
+        f"💰 Realized PnL: ₹{daily_realized_pnl_inr:.2f}\n"
+        f"🌟 Best Trade: ₹{daily_stats['best_trade_pnl']:.2f}\n"
+        f"🔻 Worst Trade: ₹{daily_stats['worst_trade_pnl']:.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+    )
+
 def generate_status_text(user_name="Trader"):
     pos_summary = ""
     has_active = False
@@ -299,15 +356,15 @@ def generate_status_text(user_name="Trader"):
         f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ACTIVE'}\n"
         f"Open Trades: {active_count}/{MAX_PARALLEL_TRADES}\n"
         f"Realized PnL (Today): ₹{daily_realized_pnl_inr:.2f}\n"
+        f"Trades Taken Today: {daily_stats['total_trades']}\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"ACTIVE TRADES:{pos_summary}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"Touch any button below to manage:"
+        f"━━━━━━━━━━━━━━━━━━━"
     )
 
 # --- TRADE TRAILING & RISK ENGINE ---
 def manage_trailing_sl(name, sym_cfg, curr_price):
-    global daily_realized_pnl_inr, cool_off_tracker
+    global daily_realized_pnl_inr, cool_off_tracker, daily_stats
     pos = active_positions[name]
     if pos.get("side") is None:
         return
@@ -334,17 +391,24 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
         success, _ = place_coindcx_order(coindcx_pair, "sell", qty)
         if success:
             trade_pnl = (curr_price - pos["entry"]) * qty
-            if sym_cfg["base_curr"] == "USDT":
-                daily_realized_pnl_inr += (trade_pnl * 90.0)  # Approx convert USDT return to INR
+            inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
+            daily_realized_pnl_inr += inr_pnl
+
+            # Update Analytics
+            daily_stats["total_trades"] += 1
+            if inr_pnl >= 0:
+                daily_stats["wins"] += 1
             else:
-                daily_realized_pnl_inr += trade_pnl
+                daily_stats["losses"] += 1
+            daily_stats["best_trade_pnl"] = max(daily_stats["best_trade_pnl"], inr_pnl)
+            daily_stats["worst_trade_pnl"] = min(daily_stats["worst_trade_pnl"], inr_pnl)
 
             cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
             send_telegram(
                 f"🛑 AUTO-EXIT (SL/Trailing Hit)\n\n"
                 f"Pair: {name}\n"
                 f"Exit Price: {curr_sym}{curr_price:.4f}\n"
-                f"PnL: {curr_sym}{trade_pnl:.2f}\n"
+                f"PnL: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})\n"
                 f"Cooldown Active: {COOL_OFF_MINUTES} mins for this pair.",
                 reply_markup=get_control_keyboard()
             )
@@ -361,14 +425,16 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
     if name in cool_off_tracker and time.time() < cool_off_tracker[name]:
         return
 
-    # Wallet Balance Verification (Auto-Skip if insufficient funds)
+    # Calculate Dynamic Allocation
     base_curr = sym_cfg["base_curr"]
-    if base_curr == "INR" and inr_bal < TRADE_INR_ALLOCATION:
+    alloc = get_dynamic_allocation(base_curr, inr_bal, usdt_bal)
+
+    if base_curr == "INR" and inr_bal < alloc:
         return
-    if base_curr == "USDT" and usdt_bal < TRADE_USDT_ALLOCATION:
+    if base_curr == "USDT" and usdt_bal < alloc:
         return
 
-    # BTC Health Check
+    # BTC Market Health
     if not is_btc_healthy():
         return
 
@@ -377,8 +443,9 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
     binance_symbol = sym_cfg["binance"]
     precision = sym_cfg["step"]
 
-    # Spread Protection
-    if not check_market_spread(pair_code):
+    # Order Book Depth & Spread Filter
+    passed_book, _ = check_orderbook_metrics(pair_code)
+    if not passed_book:
         return
 
     # Binance Early Surge Check
@@ -412,7 +479,6 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
     if should_enter:
         atr_val = float(df['atr'].iloc[-1])
         sl = max(float(df['swing_low'].iloc[-1]), curr_price - (atr_val * 1.5))
-        alloc = TRADE_USDT_ALLOCATION if base_curr == "USDT" else TRADE_INR_ALLOCATION
         raw_qty = alloc / curr_price
         qty = round(raw_qty, precision) if precision > 0 else math.floor(raw_qty)
 
@@ -426,28 +492,32 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
                 save_state(active_positions)
                 curr_sym = "$" if base_curr == "USDT" else "₹"
                 send_telegram(
-                    f"⚡ INSTITUTIONAL ENTRY EXECUTED\n\n"
+                    f"⚡ INSTITUTIONAL ENTRY (COMPOUND ENGINE)\n\n"
                     f"Pair: {name} ({base_curr})\n"
                     f"Binance Surge: +{surge_gain:.2f}%\n"
                     f"Local Price: {curr_sym}{curr_price:.4f}\n"
-                    f"Units: {qty}\n"
+                    f"Allocated: {curr_sym}{alloc:.2f} (Units: {qty})\n"
                     f"Initial SL: {curr_sym}{sl:.4f}",
                     reply_markup=get_control_keyboard()
                 )
 
 # --- BACKGROUND AUTOMATION THREADS ---
 def midnight_reset_scheduler():
-    global daily_realized_pnl_inr, cool_off_tracker
+    global daily_realized_pnl_inr, cool_off_tracker, daily_stats
     ist = timezone(timedelta(hours=5, minutes=30))
     while True:
         now = datetime.now(ist)
         next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
         time.sleep((next_run - now).total_seconds())
 
-        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL Today: ₹{daily_realized_pnl_inr:.2f}\nDaily drawdown counter reset to ₹0.00."
+        # Send full analytics report at midnight
+        report = f"🌙 MIDNIGHT REPORT (IST)\n\n" + generate_analytics_text()
         send_telegram(report)
+
+        # Reset daily counters
         daily_realized_pnl_inr = 0.0
         cool_off_tracker.clear()
+        daily_stats = {"total_trades": 0, "wins": 0, "losses": 0, "best_trade_pnl": 0.0, "worst_trade_pnl": 0.0}
 
 def handle_incoming_users():
     global is_paused
@@ -480,6 +550,9 @@ def handle_incoming_users():
                                     f"💵 USDT Balance: ${usdt_b:.2f}",
                                     chat_id=sender_id, reply_markup=get_control_keyboard()
                                 )
+                            elif cb_data == "cmd_analytics":
+                                answer_callback_query(cb["id"], "Analytics Loaded")
+                                send_telegram(generate_analytics_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_pause":
                                 is_paused = True
                                 answer_callback_query(cb["id"], "Paused")
@@ -529,8 +602,8 @@ def handle_incoming_users():
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
 
-print("Master Multi-Asset Engine Online...")
-send_telegram("🔥 CoinDCX Multi-Asset Engine Armed!\nTracking Crypto + Gold (XAU) + Forex Synthetics.", reply_markup=get_control_keyboard())
+print("Master Multi-Asset Engine with Compound & Depth Filter Online...")
+send_telegram("🔥 CoinDCX Multi-Asset Engine Armed!\nUpgrades: Dynamic Sizing + Order Book Imbalance + Analytics Deck.", reply_markup=get_control_keyboard())
 
 # Main Scan Cycle
 while True:
