@@ -8,13 +8,26 @@ import numpy as np
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 CHAT_ID = "1345385952"
 
-# "SCALP" (1m) | "SWING" (1h) | "POSITION" (1d)
+# "SCALP" (1m entry + 15m HTF) | "SWING" (1h entry + 1d HTF)
 CURRENT_MODE = "SCALP"
 
 MODE_CONFIGS = {
-    "SCALP": {"interval": "1m", "period": "1d", "adx_min": 23, "label": "⚡ [1M SCALP]"},
-    "SWING": {"interval": "1h", "period": "1mo", "adx_min": 20, "label": "🌊 [SWING]"},
-    "POSITION": {"interval": "1d", "period": "1y", "adx_min": 18, "label": "🏛️ [POSITION]"}
+    "SCALP": {
+        "entry_interval": "1m", 
+        "entry_period": "1d", 
+        "htf_interval": "15m", 
+        "htf_period": "5d", 
+        "adx_min": 23, 
+        "label": "⚡ [1M+15M SCALP CONFIRMED]"
+    },
+    "SWING": {
+        "entry_interval": "1h", 
+        "entry_period": "1mo", 
+        "htf_interval": "1d", 
+        "htf_period": "1y", 
+        "adx_min": 20, 
+        "label": "🌊 [SWING CONFIRMED]"
+    }
 }
 
 CFG = MODE_CONFIGS[CURRENT_MODE]
@@ -35,7 +48,6 @@ SYMBOLS = {
 last_signals = {name: None for name in SYMBOLS}
 
 def calculate_adx(df, length=14):
-    # Flatten series to 1D explicitly
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
     low = pd.Series(np.array(df['Low']).flatten(), index=df.index)
     close = pd.Series(np.array(df['Close']).flatten(), index=df.index)
@@ -67,15 +79,45 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram error: {e}")
 
+def get_higher_timeframe_trend(ticker_symbol):
+    """Checks 15M (or 1D) Higher Timeframe Trend using EMA 50 & EMA 200"""
+    try:
+        htf_data = yf.download(ticker_symbol, period=CFG["htf_period"], interval=CFG["htf_interval"], progress=False)
+        if htf_data is None or len(htf_data) < 50:
+            return "NEUTRAL"
+
+        df_htf = htf_data.copy()
+        if isinstance(df_htf.columns, pd.MultiIndex):
+            df_htf.columns = df_htf.columns.get_level_values(0)
+
+        close_series = pd.Series(np.array(df_htf['Close']).flatten(), index=df_htf.index)
+        ema50 = close_series.ewm(span=50, adjust=False).mean()
+        ema200 = close_series.ewm(span=min(200, len(close_series)), adjust=False).mean()
+
+        last_close = float(close_series.iloc[-1])
+        last_ema50 = float(ema50.iloc[-1])
+        last_ema200 = float(ema200.iloc[-1])
+
+        if (last_close > last_ema50) and (last_ema50 > last_ema200):
+            return "BULLISH"
+        elif (last_close < last_ema50) and (last_ema50 < last_ema200):
+            return "BEARISH"
+        return "NEUTRAL"
+    except Exception as e:
+        print(f"HTF Error: {e}")
+        return "NEUTRAL"
+
 def check_market(name, ticker_symbol):
     try:
-        data = yf.download(ticker_symbol, period=CFG["period"], interval=CFG["interval"], progress=False)
+        # 1. Higher Timeframe Confluence Check
+        htf_trend = get_higher_timeframe_trend(ticker_symbol)
+
+        # 2. Lower Timeframe Download
+        data = yf.download(ticker_symbol, period=CFG["entry_period"], interval=CFG["entry_interval"], progress=False)
         if data is None or len(data) < 50:
             return
 
         df = data.copy()
-
-        # MultiIndex fix for new yfinance format
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -100,12 +142,12 @@ def check_market(name, ticker_symbol):
         swing_h = float(df['swing_high'].iloc[-1])
         swing_l = float(df['swing_low'].iloc[-1])
 
-        print(f"[{CURRENT_MODE}] {name:<14} | Price: {curr_price:<9.2f} | ADX: {curr_adx:.1f}")
+        print(f"[{CURRENT_MODE}] {name:<14} | Price: {curr_price:<9.2f} | ADX: {curr_adx:.1f} | HTF Trend: {htf_trend}")
 
         strong_trend = curr_adx > CFG["adx_min"]
 
-        # BUY SETUP
-        if strong_trend and (curr_ema50 > curr_ema93) and (curr_price > swing_h) and (curr_price > curr_open):
+        # BUY SETUP (HTF Must be BULLISH)
+        if (htf_trend == "BULLISH") and strong_trend and (curr_ema50 > curr_ema93) and (curr_price > swing_h) and (curr_price > curr_open):
             if last_signals[name] != "BUY":
                 sl = swing_l
                 risk = curr_price - sl
@@ -113,6 +155,7 @@ def check_market(name, ticker_symbol):
                     msg = (
                         f"🚀 *{CFG['label']} BUY ALERT*\n\n"
                         f"🪙 *Asset:* `{name}`\n"
+                        f"📈 *HTF Confluence:* `15M Bullish Verified`\n"
                         f"💵 *Entry:* `{curr_price:.2f}`\n"
                         f"🛑 *Stop Loss:* `{sl:.2f}`\n\n"
                         f"🎯 *TARGETS:*\n"
@@ -121,13 +164,13 @@ def check_market(name, ticker_symbol):
                         f"• TP 3 (1:3.0): `{curr_price + (risk * 3.0):.2f}`\n"
                         f"• TP 4 (1:5.0): `{curr_price + (risk * 5.0):.2f}`\n\n"
                         f"⚡ *ADX:* `{curr_adx:.1f}`\n"
-                        f"⏱️ *Timeframe:* `{CFG['interval']}`"
+                        f"⏱️ *Entry TF:* `{CFG['entry_interval']}` | *Trend TF:* `{CFG['htf_interval']}`"
                     )
                     send_telegram(msg)
                     last_signals[name] = "BUY"
 
-        # SELL SETUP
-        elif strong_trend and (curr_ema50 < curr_ema93) and (curr_price < swing_l) and (curr_price < curr_open):
+        # SELL SETUP (HTF Must be BEARISH)
+        elif (htf_trend == "BEARISH") and strong_trend and (curr_ema50 < curr_ema93) and (curr_price < swing_l) and (curr_price < curr_open):
             if last_signals[name] != "SELL":
                 sl = swing_h
                 risk = sl - curr_price
@@ -135,6 +178,7 @@ def check_market(name, ticker_symbol):
                     msg = (
                         f"⚠️ *{CFG['label']} SELL ALERT*\n\n"
                         f"🪙 *Asset:* `{name}`\n"
+                        f"📉 *HTF Confluence:* `15M Bearish Verified`\n"
                         f"💵 *Entry:* `{curr_price:.2f}`\n"
                         f"🛑 *Stop Loss:* `{sl:.2f}`\n\n"
                         f"🎯 *TARGETS:*\n"
@@ -143,7 +187,7 @@ def check_market(name, ticker_symbol):
                         f"• TP 3 (1:3.0): `{curr_price - (risk * 3.0):.2f}`\n"
                         f"• TP 4 (1:5.0): `{curr_price - (risk * 5.0):.2f}`\n\n"
                         f"⚡ *ADX:* `{curr_adx:.1f}`\n"
-                        f"⏱️ *Timeframe:* `{CFG['interval']}`"
+                        f"⏱️ *Entry TF:* `{CFG['entry_interval']}` | *Trend TF:* `{CFG['htf_interval']}`"
                     )
                     send_telegram(msg)
                     last_signals[name] = "SELL"
@@ -151,8 +195,8 @@ def check_market(name, ticker_symbol):
     except Exception as e:
         print(f"Error on {name}: {e}")
 
-print("Cloud Bot Online...")
-send_telegram("✅ *Cloud Scalper Live 24/7!*\nTargets: 1:1.5 | 1:2 | 1:3 | 1:5")
+print("Multi-Timeframe Bot Online...")
+send_telegram("🔥 *Multi-Timeframe Confluence Engine Live!*\nFilters: 15M Trend + 1M Breakout")
 
 while True:
     for name, ticker in SYMBOLS.items():
