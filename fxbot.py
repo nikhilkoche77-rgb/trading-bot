@@ -21,13 +21,13 @@ ADMIN_CHAT_IDS = [
 COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
 COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
-# --- SIP WEIGHT & RISK ENGINE PARAMETERS ---
-TARGET_RR_RATIO = 2.0          # 1:2 Risk to Reward Target
-WEIGHT_ALLOCATION_PCT = 0.10   # 10% base SIP weight of active balance
-MIN_TRADE_INR = 100.0          # CoinDCX minimum INR execution limit
-MIN_TRADE_USDT = 1.20          # CoinDCX minimum USDT execution limit
-MAX_TRADE_INR = 500.0          # Upper ceiling cap per trade
-MAX_TRADE_USDT = 5.50          # Upper ceiling cap per trade
+# --- PROFESSIONAL RISK & REWARD SETTINGS ---
+RISK_PER_TRADE_PCT = 0.015     # Default 1.5% account risk per trade
+TARGET_RR_RATIO = 2.0          # 1:2 Risk to Reward Ratio (TP = Entry + 2*Risk)
+MIN_TRADE_INR = 100.0          # CoinDCX minimum INR order limit
+MIN_TRADE_USDT = 1.20          # CoinDCX minimum USDT order limit
+MAX_TRADE_INR = 500.0          # Max trade cap
+MAX_TRADE_USDT = 5.50          # Max trade cap
 
 MAX_PARALLEL_TRADES = 2
 DAILY_MAX_LOSS_INR = 30.0
@@ -48,7 +48,7 @@ daily_stats = {
     "worst_trade_pnl": 0.0
 }
 
-# --- UNIFIED ASSET UNIVERSE WITH LOT CONTRACTS ---
+# --- UNIFIED MULTI-ASSET PAIRS WITH BROKER LOTS ---
 SYMBOLS = {
     # Commodities & Forex Synthetics
     "XAU/USDT": {"base_curr": "USDT", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4, "lot_contract": 100.0},
@@ -56,7 +56,7 @@ SYMBOLS = {
     "USDT/INR": {"base_curr": "INR", "binance": "USDCUSDT", "pair": "B-USDT_INR", "coindcx": "USDTINR", "step": 2, "lot_contract": 100000.0},
     "GOLD/INR": {"base_curr": "INR", "binance": "PAXGUSDT", "pair": "B-PAXG_INR", "coindcx": "PAXGINR", "step": 4, "lot_contract": 100.0},
 
-    # Crypto Majors & Altcoins
+    # Global USDT / USD Pairs
     "BTC/USDT": {"base_curr": "USDT", "binance": "BTCUSDT", "pair": "B-BTC_USDT", "coindcx": "BTCUSDT", "step": 5, "lot_contract": 1.0},
     "ETH/USDT": {"base_curr": "USDT", "binance": "ETHUSDT", "pair": "B-ETH_USDT", "coindcx": "ETHUSDT", "step": 4, "lot_contract": 1.0},
     "SOL/USDT": {"base_curr": "USDT", "binance": "SOLUSDT", "pair": "B-SOL_USDT", "coindcx": "SOLUSDT", "step": 3, "lot_contract": 1.0},
@@ -87,13 +87,41 @@ def calculate_lot_size(qty, lot_contract):
     lot = qty / lot_contract
     return round(lot, 5) if lot < 0.01 else round(lot, 3)
 
-# --- SIP WEIGHT SIZING ENGINE ---
-def calculate_sip_weight_allocation(base_curr, inr_bal, usdt_bal):
+# --- PROFESSIONAL POSITION SIZING & R:R ENGINE ---
+def compute_risk_adjusted_position(curr_price, sl_price, base_curr, inr_bal, usdt_bal, precision):
+    """
+    Computes exact trade volume based on max risk capital, 
+    matching standard institutional risk management.
+    """
     bal = inr_bal if base_curr == "INR" else usdt_bal
-    raw_amount = bal * WEIGHT_ALLOCATION_PCT
+    risk_per_unit = abs(curr_price - sl_price)
+    
+    if risk_per_unit <= 0:
+        return 0.0, 0.0, 0.0
+
+    # Max risk allowed in capital for this single trade
+    capital_at_risk = bal * RISK_PER_TRADE_PCT
+    
+    # Calculate required quantity: Qty = Risk Capital / Unit Risk
+    calculated_qty = capital_at_risk / risk_per_unit
+    trade_value = calculated_qty * curr_price
+
+    # Floor & Ceiling adjustment for minimum/maximum limits
     min_limit = MIN_TRADE_INR if base_curr == "INR" else MIN_TRADE_USDT
     max_limit = MAX_TRADE_INR if base_curr == "INR" else MAX_TRADE_USDT
-    return max(min_limit, min(raw_amount, max_limit))
+
+    if trade_value < min_limit:
+        trade_value = min_limit
+        calculated_qty = trade_value / curr_price
+    elif trade_value > max_limit:
+        trade_value = max_limit
+        calculated_qty = trade_value / curr_price
+
+    final_qty = round(calculated_qty, precision) if precision > 0 else math.floor(calculated_qty)
+    actual_trade_amount = round(final_qty * curr_price, 2)
+    tp_price = curr_price + (risk_per_unit * TARGET_RR_RATIO)
+
+    return final_qty, actual_trade_amount, tp_price
 
 # --- PERSISTENT STATE ---
 def load_state():
@@ -122,11 +150,8 @@ def get_control_keyboard():
             {"text": "💰 Wallets", "callback_data": "cmd_balance"}
         ],
         [
-            {"text": f"⚖️ SIP Weight ({int(WEIGHT_ALLOCATION_PCT*100)}%)", "callback_data": "cmd_toggle_weight"},
-            {"text": f"🎯 Target (1:{TARGET_RR_RATIO})", "callback_data": "cmd_toggle_rr"}
-        ],
-        [
-            {"text": "📋 SIP Weight Breakdown", "callback_data": "cmd_weight_calc"}
+            {"text": f"🎯 R:R (1:{TARGET_RR_RATIO})", "callback_data": "cmd_toggle_rr"},
+            {"text": f"🛡️ Risk ({RISK_PER_TRADE_PCT*100:.1f}%)", "callback_data": "cmd_toggle_risk"}
         ]
     ]
 
@@ -218,7 +243,7 @@ def emergency_close_all():
     save_state(active_positions)
     return closed_count
 
-# --- ORDER BOOK SPREAD & DEPTH ---
+# --- ORDER BOOK SPREAD & DEPTH IMBALANCE ---
 def check_orderbook_metrics(pair_name):
     try:
         url = f"https://public.coindcx.com/market_data/orderbook?pair={pair_name}"
@@ -326,24 +351,20 @@ def calculate_technical_indicators(df, length=14):
     adx = dx.rolling(length).mean()
     return atr, adx
 
-# --- SIP BREAKDOWN & STATUS TEXTS ---
-def generate_sip_breakdown_text(inr_bal, usdt_bal):
-    inr_trade = calculate_sip_weight_allocation("INR", inr_bal, usdt_bal)
-    usdt_trade = calculate_sip_weight_allocation("USDT", inr_bal, usdt_bal)
-    sol_qty_sample = inr_trade / 14000.0 if inr_trade > 0 else 0.0
+def generate_analytics_text():
+    total = daily_stats["total_trades"]
+    win_rate = (daily_stats["wins"] / total * 100) if total > 0 else 0.0
     return (
-        f"📋 SIP WEIGHT DYNAMIC BREAKDOWN\n"
+        f"📊 INSTITUTIONAL PERFORMANCE REPORT\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🇮🇳 INR Wallet: ₹{inr_bal:.2f}\n"
-        f"• Base Allocation Weight: {int(WEIGHT_ALLOCATION_PCT*100)}%\n"
-        f"• Current Calculated Trade Amount: ₹{inr_trade:.2f}\n"
-        f"• Estimated Execution Volume (Sample SOL): ~{sol_qty_sample:.4f} Units\n"
-        f"• Auto-Limits: Min ₹{MIN_TRADE_INR:.0f} | Max ₹{MAX_TRADE_INR:.0f}\n\n"
-        f"💵 USDT Wallet: ${usdt_bal:.2f}\n"
-        f"• Current Calculated Trade Amount: ${usdt_trade:.2f}\n"
-        f"• Auto-Limits: Min ${MIN_TRADE_USDT:.2f} | Max ${MAX_TRADE_USDT:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 Balance jaise badhega ya ghatega, ye amounts aur quantities live dynamically adjust hongi."
+        f"🔢 Total Trades: {total}\n"
+        f"✅ Wins: {daily_stats['wins']} | ❌ Losses: {daily_stats['losses']}\n"
+        f"🎯 Realized Win Rate: {win_rate:.1f}%\n"
+        f"📐 Active Risk Model: {RISK_PER_TRADE_PCT*100:.1f}% Risk | 1:{TARGET_RR_RATIO} Reward\n"
+        f"💰 Realized Net PnL: ₹{daily_realized_pnl_inr:.2f}\n"
+        f"🌟 Best Winner: ₹{daily_stats['best_trade_pnl']:.2f}\n"
+        f"🔻 Worst Trade: ₹{daily_stats['worst_trade_pnl']:.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━"
     )
 
 def generate_status_text(user_name="Trader"):
@@ -355,9 +376,8 @@ def generate_status_text(user_name="Trader"):
             curr_sym = "$" if pos.get("curr") == "USDT" else "₹"
             pnl_pct = ((pos["best_price"] - pos["entry"]) / pos["entry"]) * 100 if pos["entry"] > 0 else 0.0
             pos_summary += (
-                f"\n📌 {p_name}\n"
-                f"• Volume (Lot): {pos.get('lot', 0.0):.5f} Lot ({pos['qty']} units)\n"
-                f"• Amount Allocated: {curr_sym}{pos.get('amount', 0.0):.2f}\n"
+                f"\n📌 {p_name} ({pos.get('lot', 0.0):.5f} Lot)\n"
+                f"• Amount: {curr_sym}{pos.get('amount', 0.0):.2f}\n"
                 f"• Entry: {curr_sym}{pos['entry']:.4f} | Cur: {curr_sym}{pos['best_price']:.4f}\n"
                 f"• SL: {curr_sym}{pos['sl']:.4f} | TP (1:{TARGET_RR_RATIO}): {curr_sym}{pos.get('tp', 0.0):.4f}\n"
                 f"• Running Trailing: {pnl_pct:+.2f}%\n"
@@ -369,26 +389,11 @@ def generate_status_text(user_name="Trader"):
     return (
         f"👑 Terminal Status ({user_name})\n"
         f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ONLINE'}\n"
-        f"SIP Weight: {int(WEIGHT_ALLOCATION_PCT*100)}% Dynamic | 1:{TARGET_RR_RATIO} Target\n"
+        f"Config: {RISK_PER_TRADE_PCT*100:.1f}% Risk/Trade | 1:{TARGET_RR_RATIO} R:R Target\n"
         f"Open Positions: {active_count}/{MAX_PARALLEL_TRADES}\n"
         f"Net Daily PnL: ₹{daily_realized_pnl_inr:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"ACTIVE TRADES:{pos_summary}\n"
-        f"━━━━━━━━━━━━━━━━━━━"
-    )
-
-def generate_analytics_text():
-    total = daily_stats["total_trades"]
-    win_rate = (daily_stats["wins"] / total * 100) if total > 0 else 0.0
-    return (
-        f"📊 INSTITUTIONAL PERFORMANCE REPORT\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔢 Total Completed Trades: {total}\n"
-        f"✅ Wins: {daily_stats['wins']} | ❌ Losses: {daily_stats['losses']}\n"
-        f"🎯 Win Rate: {win_rate:.1f}%\n"
-        f"💰 Realized Net PnL: ₹{daily_realized_pnl_inr:.2f}\n"
-        f"🌟 Best Winner: ₹{daily_stats['best_trade_pnl']:.2f}\n"
-        f"🔻 Worst Trade: ₹{daily_stats['worst_trade_pnl']:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -404,7 +409,7 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
     qty = pos["qty"]
     curr_sym = "$" if sym_cfg["base_curr"] == "USDT" else "₹"
 
-    # Breakeven Lock at 1:1 move
+    # Breakeven Lock at 1:1 Risk
     risk_distance = abs(pos["entry"] - pos["sl"])
     if curr_price >= (pos["entry"] + risk_distance) and pos["sl"] < pos["entry"]:
         pos["sl"] = pos["entry"]
@@ -425,12 +430,12 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
 
             cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
             send_telegram(
-                f"🎯 TAKE PROFIT TARGET FILLED (1:{TARGET_RR_RATIO})\n\n"
+                f"🎯 TAKE PROFIT TARGET FILLED (1:{TARGET_RR_RATIO} R:R)\n\n"
                 f"Asset: {name}\n"
                 f"Volume (Lot): {pos.get('lot', 0.0):.5f} Lot\n"
-                f"Quantity: {qty} units\n"
                 f"Exit Price: {curr_sym}{curr_price:.4f}\n"
-                f"Net Profit: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
+                f"Net Profit: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})\n"
+                f"Risk-to-Reward successfully harvested!",
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
@@ -440,4 +445,8 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
     # Trailing Stop Loss
     if curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
-        new_sl =
+        new_sl = curr_price - trailing_gap
+        if new_sl > pos["sl"]:
+            pos["sl"] = new_sl
+            save_state(active_positions)
+    
