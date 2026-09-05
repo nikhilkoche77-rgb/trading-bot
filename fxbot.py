@@ -58,7 +58,74 @@ def send_telegram(message, chat_id=MY_CHAT_ID):
     except Exception as e:
         print(f"Telegram error: {e}")
 
-# --- INCOMING TELEGRAM LISTENER (REPLY SYSTEM) ---
+# --- INCOMING TELEGRAM SMART LISTENER ---
+def get_smart_public_reply(user_name, text):
+    msg = text.lower()
+    
+    # 1. Greetings
+    if any(w in msg for w in ["hi", "hello", "hey", "namaste", "halo"]):
+        return (
+            f"Hello {user_name}! 👋\n\n"
+            f"Main ek **Algorithmic Trading & Analytics Engine** hoon.\n"
+            f"Aap mujhse strategy, indicators, timeframes ya market scanning ke baare me pooch sakte hain.\n\n"
+            f"Type karein `/help` saare available commands dekhne ke liye."
+        )
+
+    # 2. Strategy & Concept Questions
+    elif any(w in msg for w in ["strategy", "kaam", "working", "kaise", "logic", "setup"]):
+        return (
+            f"📊 *Strategy Architecture:*\n\n"
+            f"• **Trend Filter:** 15-Minute chart par EMA 50 & EMA 200 confluence.\n"
+            f"• **Entry Trigger:** 1-Minute chart par Swing High/Low Breakout.\n"
+            f"• **Strength Filter:** ADX (Average Directional Index) > 23.\n"
+            f"• **Risk Management:** Dynamic ATR Trailing Stop-Loss.\n\n"
+            f"Bot sideways market ko strictly avoid karta hai."
+        )
+
+    # 3. Indicators Details
+    elif any(w in msg for w in ["indicator", "ema", "adx", "atr", "rsi"]):
+        return (
+            f"🛠️ *Technical Indicators Used:*\n\n"
+            f"1. **EMA (Exponential Moving Average):** 50 aur 200 trend identify karne ke liye.\n"
+            f"2. **ADX (14):** Trend ki strength measure karta hai taaki choppy market me false breakout na mile.\n"
+            f"3. **ATR (14):** Market volatility ke according dynamic Stop Loss aur Trailing SL calculate karta hai."
+        )
+
+    # 4. Timeframe Questions
+    elif any(w in msg for w in ["timeframe", "tf", "scalp", "swing"]):
+        return (
+            f"⏱️ *Timeframe Logic:*\n\n"
+            f"• **Scalping Mode:** 15M (Trend Verification) + 1M (Micro Entry)\n"
+            f"• **Swing Mode:** 1D (Trend Verification) + 1H (Structure Entry)\n\n"
+            f"Higher timeframe hamesha trade direction decide karta hai."
+        )
+
+    # 5. Signals or Access Questions
+    elif any(w in msg for w in ["signal", "alert", "buy", "sell", "access", "join", "free"]):
+        return (
+            f"🔒 *Access Notice:*\n\n"
+            f"Live execution alerts aur direct trade calls filhal strictly **Private / Admin-Only** hain.\n"
+            f"Public users system ke mechanics aur strategies explore kar sakte hain."
+        )
+
+    # 6. Help command
+    elif "/help" in msg or "help" in msg:
+        return (
+            f"ℹ️ *Available Topics:*\n\n"
+            f"Aap niche diye gaye topics par pooch sakte hain:\n"
+            f"• `strategy` - Bot ka logic kaise kaam karta hai\n"
+            f"• `indicators` - Kaunse indicators use hote hain\n"
+            f"• `timeframe` - Scalping vs Swing timing\n"
+            f"• `status` - Bot live engine check"
+        )
+
+    # 7. Default Contextual Fallback (Same-Same reply nahi aayega)
+    else:
+        return (
+            f"Maine aapka message read kiya: *\"{text}\"*\n\n"
+            f"Yeh ek automated quantitative trading system hai. Trading strategy, indicators ya logic samajhne ke liye `/help` bhejein."
+        )
+
 def telegram_listener():
     last_update_id = 0
     while True:
@@ -75,7 +142,10 @@ def telegram_listener():
                         sender_id = str(update["message"]["chat"]["id"])
                         user_name = update["message"]["from"].get("first_name", "Trader")
 
-                        # Case 1: Aapka personal access (Admin)
+                        # Print user details in Render logs
+                        print(f"Chat: {user_name} ({sender_id}) -> {msg_text}")
+
+                        # Case 1: Agar Aap (Admin) hain
                         if sender_id == MY_CHAT_ID:
                             if msg_text == "/start" or msg_text.lower() == "status":
                                 reply = (
@@ -83,21 +153,15 @@ def telegram_listener():
                                     f"🤖 *System Status:* `Online 24/7`\n"
                                     f"⚙️ *Current Mode:* `{CFG['label']}`\n"
                                     f"📊 *Assets Monitored:* `{len(SYMBOLS)} Pairs`\n"
-                                    f"🛡️ *Trailing SL:* `Active`\n\n"
-                                    f"Market scan background me chal raha hai. Jaise hi valid setup banega, signal instant trigger ho jayega."
+                                    f"🛡️ *Trailing SL Engine:* `Active`"
                                 )
                                 send_telegram(reply, chat_id=sender_id)
                             else:
-                                send_telegram(f"🤖 Bot is running! Type `/start` for status.", chat_id=sender_id)
+                                send_telegram(f"🤖 Bot running smoothly! Type `/start` for admin control.", chat_id=sender_id)
 
-                        # Case 2: Koi random unknown user start kare
+                        # Case 2: Agar Unknown / Public user hai (Accurate & Dynamic Reply)
                         else:
-                            reply = (
-                                f"Hello {user_name}! 👋\n\n"
-                                f"⚠️ *Private Algorithmic Trading Bot*\n"
-                                f"Yeh bot ek private automated server par configured hai. Public access filhal disabled hai.\n\n"
-                                f"🔒 *Access Status:* Restricted"
-                            )
+                            reply = get_smart_public_reply(user_name, msg_text)
                             send_telegram(reply, chat_id=sender_id)
 
         except Exception as e:
