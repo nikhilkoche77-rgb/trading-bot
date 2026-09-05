@@ -14,42 +14,51 @@ import numpy as np
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = [
     "1345385952",           # Admin 1 (Aap)
-    "SECOND_USER_CHAT_ID"   # Admin 2 (Dusre user ki ID)
+    "SECOND_USER_CHAT_ID"   # Admin 2 (Optional)
 ]
 
 # --- COINDCX API CREDENTIALS ---
 COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
 COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
-# --- MICRO-CAPITAL RISK MANAGEMENT (Rs. 100-110 TRADES) ---
-# Rs. 110 allocation taaki fee/TDS ke baad CoinDCX ka Rs. 100 minimum rule violate na ho
-TRADE_INR_ALLOCATION = 110.0  
+# --- STRICT RISK MANAGEMENT (Rs. 1,000 TOTAL POOL) ---
+TRADE_INR_ALLOCATION = 110.0  # Safe micro order buffer
 MAX_PARALLEL_TRADES = 2       # Ek waqt me max 2 trades (~Rs. 220 total engaged)
 
-# Low-unit price coins best suited for Rs. 100 orders
+# Top 12 High-Volume & Volatile CoinDCX INR Pairs
 SYMBOLS = {
+    "SOL/INR": {"yf": "SOL-USD", "coindcx": "SOLINR", "step": 3},
     "XRP/INR": {"yf": "XRP-USD", "coindcx": "XRPINR", "step": 1},
+    "DOGE/INR": {"yf": "DOGE-USD", "coindcx": "DOGEINR", "step": 0},
     "ADA/INR": {"yf": "ADA-USD", "coindcx": "ADAINR", "step": 1},
-    "DOGE/INR": {"yf": "DOGE-USD", "coindcx": "DOGEINR", "step": 0}
+    "SHIB/INR": {"yf": "SHIB-USD", "coindcx": "SHIBINR", "step": 0},
+    "PEPE/INR": {"yf": "PEPE24478-USD", "coindcx": "PEPEINR", "step": 0},
+    "BONK/INR": {"yf": "BONK-USD", "coindcx": "BONKINR", "step": 0},
+    "SUI/INR": {"yf": "SUI20947-USD", "coindcx": "SUIINR", "step": 1},
+    "NEAR/INR": {"yf": "NEAR-USD", "coindcx": "NEARINR", "step": 2},
+    "AVAX/INR": {"yf": "AVAX-USD", "coindcx": "AVAXINR", "step": 2},
+    "RENDER/INR": {"yf": "RENDER-USD", "coindcx": "RENDERINR", "step": 2},
+    "TRX/INR": {"yf": "TRX-USD", "coindcx": "TRXINR", "step": 0}
 }
 
+# Responsive High-Volatility Strategy Setup
 STRATEGIES = {
-    "SCALP_MOMENTUM": {
-        "label": "⚡ [MICRO SCALP - 15M/5M]",
-        "htf_interval": "15m",
-        "htf_period": "5d",
-        "entry_interval": "5m",
-        "entry_period": "5d",
-        "adx_min": 24.0,
+    "RAPID_VOLATILITY_SCALP": {
+        "label": "⚡ [VOLATILITY SCALP - 5M/1M]",
+        "htf_interval": "5m",
+        "htf_period": "1d",
+        "entry_interval": "1m",
+        "entry_period": "1d",
+        "adx_min": 19.0,           # Lowered for instant breakout detection
         "tp_multipliers": [1.5, 2.5]
     },
-    "INTRADAY_TREND": {
-        "label": "⏱️ [MICRO INTRADAY - 1D/15M]",
-        "htf_interval": "1d",
-        "htf_period": "60d",
-        "entry_interval": "15m",
-        "entry_period": "10d",
-        "adx_min": 22.0,
+    "INTRADAY_MOMENTUM": {
+        "label": "⏱️ [MOMENTUM TREND - 1H/5M]",
+        "htf_interval": "1h",
+        "htf_period": "15d",
+        "entry_interval": "5m",
+        "entry_period": "5d",
+        "adx_min": 20.0,
         "tp_multipliers": [2.0, 3.5]
     }
 }
@@ -116,7 +125,6 @@ def calculate_technical_indicators(df, length=14):
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
     low = pd.Series(np.array(df['Low']).flatten(), index=df.index)
     close = pd.Series(np.array(df['Close']).flatten(), index=df.index)
-    volume = pd.Series(np.array(df['Volume']).flatten(), index=df.index)
 
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
@@ -135,23 +143,22 @@ def calculate_technical_indicators(df, length=14):
 
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
     adx = dx.rolling(length).mean()
-    vol_ma = volume.rolling(20).mean()
 
-    return atr, adx, vol_ma
+    return atr, adx
 
 def get_macro_trend(ticker_symbol, period, interval):
     try:
         data = yf.download(ticker_symbol, period=period, interval=interval, progress=False)
-        if data is None or len(data) < 30:
+        if data is None or len(data) < 25:
             return "NEUTRAL"
         df = data.copy()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         close_series = pd.Series(np.array(df['Close']).flatten(), index=df.index)
-        ema50 = close_series.ewm(span=min(50, len(close_series)), adjust=False).mean()
+        ema30 = close_series.ewm(span=min(30, len(close_series)), adjust=False).mean()
         last_close = float(close_series.iloc[-1])
-        last_ema = float(ema50.iloc[-1])
+        last_ema = float(ema30.iloc[-1])
 
         if last_close > last_ema:
             return "BULLISH"
@@ -171,13 +178,13 @@ def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
     qty = pos["qty"]
 
     if pos["side"] == "BUY":
-        # Breakeven Lock: Jab 1x ATR upar ho jaye, SL ko entry price par le aao
+        # Breakeven Protection (Cost Lock)
         if curr_price >= (pos["entry"] + pos["atr"]) and pos["sl"] < pos["entry"]:
             pos["sl"] = pos["entry"]
             send_telegram(
-                f"🛡️ *BREAKEVEN SL LOCKED (NO RISK)*\n"
+                f"🛡️ *BREAKEVEN LOCKED (ZERO RISK)*\n"
                 f"🏷️ `{strat_label}` | `{name}`\n"
-                f"💵 Stop Loss moved to Entry: `{pos['entry']:.2f}`"
+                f"💵 Stop Loss adjusted to Entry: `{pos['entry']:.4f}`"
             )
 
         if curr_price > pos["best_price"]:
@@ -188,16 +195,16 @@ def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
                 send_telegram(
                     f"📈 *TRAILING SL RAISED*\n"
                     f"🏷️ `{strat_label}` | `{name}`\n"
-                    f"🛑 New SL: `{pos['sl']:.2f}`"
+                    f"🛑 New SL: `{pos['sl']:.4f}`"
                 )
         elif curr_price <= pos["sl"]:
             success, resp = place_coindcx_order(coindcx_pair, "sell", qty)
             if success:
                 send_telegram(
-                    f"🛑 *COINDCX ORDER EXITED (SL/TARGET)*\n\n"
+                    f"🛑 *COINDCX ORDER EXITED*\n\n"
                     f"🏷️ Strategy: `{strat_label}`\n"
                     f"🪙 Pair: `{coindcx_pair}`\n"
-                    f"💵 Exit Price: `{curr_price:.2f}`\n"
+                    f"💵 Exit Price: `{curr_price:.4f}`\n"
                     f"📦 Sold Units: `{qty}`\n"
                     f"✅ CoinDCX Status: `Filled`"
                 )
@@ -207,7 +214,6 @@ def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
 
 def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
     try:
-        # Max open position cap
         if count_open_positions() >= MAX_PARALLEL_TRADES:
             return
 
@@ -220,31 +226,29 @@ def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
             return
 
         data = yf.download(ticker, period=cfg["entry_period"], interval=cfg["entry_interval"], progress=False)
-        if data is None or len(data) < 50:
+        if data is None or len(data) < 35:
             return
 
         df = data.copy()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        for col in ['Open', 'High', 'Low', 'Close']:
             if isinstance(df[col], pd.DataFrame):
                 df[col] = df[col].iloc[:, 0]
 
         close_series = pd.Series(np.array(df['Close']).flatten(), index=df.index)
+        df['ema20'] = close_series.ewm(span=20, adjust=False).mean()
         df['ema50'] = close_series.ewm(span=50, adjust=False).mean()
-        df['ema93'] = close_series.ewm(span=93, adjust=False).mean()
-        df['atr'], df['adx'], df['vol_ma'] = calculate_technical_indicators(df)
+        df['atr'], df['adx'] = calculate_technical_indicators(df)
 
-        df['swing_high'] = df['High'].iloc[-16:-1].max()
-        df['swing_low'] = df['Low'].iloc[-16:-1].min()
+        df['swing_high'] = df['High'].iloc[-10:-1].max()
+        df['swing_low'] = df['Low'].iloc[-10:-1].min()
 
         curr_price = float(df['Close'].iloc[-1])
         curr_open = float(df['Open'].iloc[-1])
-        curr_vol = float(df['Volume'].iloc[-1])
-        vol_avg = float(df['vol_ma'].iloc[-1]) if not pd.isna(df['vol_ma'].iloc[-1]) else 0.0
+        curr_ema20 = float(df['ema20'].iloc[-1])
         curr_ema50 = float(df['ema50'].iloc[-1])
-        curr_ema93 = float(df['ema93'].iloc[-1])
         curr_adx = float(df['adx'].iloc[-1]) if not pd.isna(df['adx'].iloc[-1]) else 0.0
         curr_atr = float(df['atr'].iloc[-1]) if not pd.isna(df['atr'].iloc[-1]) else 0.0
         swing_h = float(df['swing_high'].iloc[-1])
@@ -253,15 +257,14 @@ def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
         manage_trailing_sl(strat_key, cfg["label"], name, sym_cfg, curr_price)
 
         trend_strong = curr_adx > cfg["adx_min"]
-        volume_surge = curr_vol > vol_avg
-        ema_aligned = curr_ema50 > curr_ema93
+        ema_aligned = curr_ema20 > curr_ema50
         breakout_confirmed = (curr_price > swing_h) and (curr_price > curr_open)
 
         active_pos = active_positions[strat_key][name]["side"]
         tp_mults = cfg["tp_multipliers"]
 
-        # BUY SETUP
-        if (active_pos is None) and trend_strong and volume_surge and ema_aligned and breakout_confirmed:
+        # FAST EXECUTION SETUP
+        if (active_pos is None) and trend_strong and ema_aligned and breakout_confirmed:
             atr_sl = curr_price - (curr_atr * 1.5)
             sl = max(swing_l, atr_sl)
             risk = curr_price - sl
@@ -277,22 +280,22 @@ def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
                         "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
                     }
                     msg = (
-                        f"🎯 *₹100 MICRO-TRADE EXECUTED (COINDCX)*\n\n"
+                        f"🚀 *HIGH-VOLATILITY BUY EXECUTED*\n\n"
                         f"🏷️ Strategy: `{cfg['label']}`\n"
                         f"🪙 Pair: `{coindcx_pair}`\n"
-                        f"💵 Approx INR Entry: `₹{inr_price:.2f}`\n"
+                        f"💵 Approx INR Entry: `₹{inr_price:.4f}`\n"
                         f"📦 Quantity: `{qty}` (~₹{TRADE_INR_ALLOCATION:.0f})\n"
-                        f"🛑 Initial SL: `{sl:.2f}`\n"
-                        f"🎯 Target 1: `{curr_price + (risk * tp_mults[0]):.2f}`\n"
-                        f"🎯 Target 2: `{curr_price + (risk * tp_mults[1]):.2f}`\n\n"
-                        f"⚡ Status: `Active with Breakeven & Trailing SL`"
+                        f"🛑 Initial SL: `{sl:.4f}`\n"
+                        f"🎯 TP 1: `{curr_price + (risk * tp_mults[0]):.4f}`\n"
+                        f"🎯 TP 2: `{curr_price + (risk * tp_mults[1]):.4f}`\n\n"
+                        f"⚡ *Status:* Breakeven Lock + Trailing SL Active"
                     )
                     send_telegram(msg)
                 else:
-                    print(f"Order rejected on CoinDCX for {name}: {resp}")
+                    print(f"CoinDCX rejection for {name}: {resp}")
 
     except Exception as e:
-        print(f"Strategy error on [{strat_key}] {name}: {e}")
+        print(f"Error on [{strat_key}] {name}: {e}")
 
 def handle_incoming_users():
     last_update_id = 0
@@ -311,12 +314,12 @@ def handle_incoming_users():
 
                         if sender_id in ADMIN_CHAT_IDS:
                             send_telegram(
-                                f"👑 *CoinDCX ₹100 Engine ({user_name})*\n\n"
-                                f"💰 Per Trade Size: `₹{TRADE_INR_ALLOCATION:.0f} INR`\n"
-                                f"🛡️ Max Concurrent Trades: `2 (Total ₹220 engaged)`\n"
-                                f"🪙 Active Pairs: `XRP, ADA, DOGE`\n"
-                                f"🎯 System: `Breakeven Lock + Trailing SL Active`\n"
-                                f"🟢 Status: `Scanning for High-Probability Setups`",
+                                f"👑 *CoinDCX Top-12 Volatility Engine ({user_name})*\n\n"
+                                f"💰 Allocation: `₹{TRADE_INR_ALLOCATION:.0f} INR / trade`\n"
+                                f"🛡️ Risk Cap: `Max 2 Trades (₹220 total engaged)`\n"
+                                f"🪙 Active Coins: `12 High-Volume Pairs (SOL, DOGE, PEPE, SUI...)`\n"
+                                f"⚡ Engine: `1M Rapid Breakout Scanner`\n"
+                                f"🟢 Status: `Live & Scanning`",
                                 chat_id=sender_id
                             )
                         else:
@@ -327,12 +330,12 @@ def handle_incoming_users():
 
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 
-print("CoinDCX ₹100 Micro-Trading Engine Online...")
+print("CoinDCX Top-12 High Volatility Engine Online...")
 send_telegram(
-    "⚡ *CoinDCX ₹100 Micro-Capital Engine Live!*\n\n"
-    f"📦 Trade Allocation: `₹{TRADE_INR_ALLOCATION:.0f} per trade`\n"
-    "🛡️ Risk: Max 2 positions parallel with Breakeven stop lock.\n"
-    "🪙 Monitored Coins: `XRP/INR, ADA/INR, DOGE/INR`"
+    "🔥 *Top-12 High Volatility Engine Armed!*\n\n"
+    f"📦 Allocation: `₹{TRADE_INR_ALLOCATION:.0f} per trade`\n"
+    "🛡️ Risk Cap: Max 2 parallel trades (~₹220 engaged, ₹780 safe buffer)\n"
+    "🪙 Monitored Pairs: `SOL, XRP, DOGE, ADA, SHIB, PEPE, BONK, SUI, NEAR, AVAX, RENDER, TRX`"
 )
 
 while True:
@@ -340,4 +343,4 @@ while True:
         for strat_key, cfg in STRATEGIES.items():
             check_strategy_for_symbol(strat_key, cfg, name, sym_cfg)
             time.sleep(1)
-    time.sleep(5)
+    time.sleep(3)
