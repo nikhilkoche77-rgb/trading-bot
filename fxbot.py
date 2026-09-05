@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 # --- TELEGRAM CONFIG ---
-TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"  # Apna poora token verify karein
+TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 CHAT_ID = "1345385952"
 
 # "SCALP" (1m) | "SWING" (1h) | "POSITION" (1d)
@@ -35,7 +35,11 @@ SYMBOLS = {
 last_signals = {name: None for name in SYMBOLS}
 
 def calculate_adx(df, length=14):
-    high, low, close = df['High'], df['Low'], df['Close']
+    # Flatten series to 1D explicitly
+    high = pd.Series(np.array(df['High']).flatten(), index=df.index)
+    low = pd.Series(np.array(df['Low']).flatten(), index=df.index)
+    close = pd.Series(np.array(df['Close']).flatten(), index=df.index)
+
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
     tr3 = (low - close.shift(1)).abs()
@@ -45,11 +49,11 @@ def calculate_adx(df, length=14):
     up_move = high - high.shift(1)
     down_move = low.shift(1) - low
 
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0).flatten()
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0).flatten()
 
-    plus_di = 100 * (pd.Series(plus_dm).rolling(length).mean() / atr)
-    minus_di = 100 * (pd.Series(minus_dm).rolling(length).mean() / atr)
+    plus_di = 100 * (pd.Series(plus_dm, index=df.index).rolling(length).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm, index=df.index).rolling(length).mean() / atr)
 
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
     adx = dx.rolling(length).mean()
@@ -66,17 +70,23 @@ def send_telegram(message):
 def check_market(name, ticker_symbol):
     try:
         data = yf.download(ticker_symbol, period=CFG["period"], interval=CFG["interval"], progress=False)
-        if len(data) < 100:
+        if data is None or len(data) < 50:
             return
 
         df = data.copy()
+
+        # MultiIndex fix for new yfinance format
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
         for col in ['Open', 'High', 'Low', 'Close']:
             if isinstance(df[col], pd.DataFrame):
                 df[col] = df[col].iloc[:, 0]
 
         # Indicators Calculation
-        df['ema50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['ema93'] = df['Close'].ewm(span=93, adjust=False).mean()
+        close_series = pd.Series(np.array(df['Close']).flatten(), index=df.index)
+        df['ema50'] = close_series.ewm(span=50, adjust=False).mean()
+        df['ema93'] = close_series.ewm(span=93, adjust=False).mean()
         df['adx'] = calculate_adx(df)
 
         df['swing_high'] = df['High'].iloc[-16:-1].max()
@@ -142,11 +152,10 @@ def check_market(name, ticker_symbol):
         print(f"Error on {name}: {e}")
 
 print("Cloud Bot Online...")
-send_telegram(f"✅ *Cloud Scalper Live 24/7!*\nTargets: 1:1.5 | 1:2 | 1:3 | 1:5")
+send_telegram("✅ *Cloud Scalper Live 24/7!*\nTargets: 1:1.5 | 1:2 | 1:3 | 1:5")
 
 while True:
     for name, ticker in SYMBOLS.items():
         check_market(name, ticker)
-        time.sleep(0.5)
-    print("-" * 50)
-    time.sleep(15)
+        time.sleep(2)
+    time.sleep(10)
