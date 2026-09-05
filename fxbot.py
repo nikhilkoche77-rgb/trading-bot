@@ -313,13 +313,33 @@ def handle_incoming_users():
                         user_name = update["message"]["from"].get("first_name", "Trader")
 
                         if sender_id in ADMIN_CHAT_IDS:
+                            # Check active positions & calculate live PnL
+                            pos_summary = ""
+                            has_active = False
+                            for s_key, pairs in active_positions.items():
+                                for p_name, pos in pairs.items():
+                                    if pos["side"] is not None:
+                                        has_active = True
+                                        pnl_pts = pos["best_price"] - pos["entry"]
+                                        pnl_pct = (pnl_pts / pos["entry"]) * 100 if pos["entry"] > 0 else 0.0
+                                        pos_summary += (
+                                            f"\n🪙 *{p_name}* ({pos['qty']} units)\n"
+                                            f"💵 Entry: `{pos['entry']:.4f}` | Cur/High: `{pos['best_price']:.4f}`\n"
+                                            f"🛑 SL: `{pos['sl']:.4f}`\n"
+                                            f"📈 Trailing PnL: `{pnl_pct:+.2f}%`\n"
+                                        )
+
+                            if not has_active:
+                                pos_summary = "\n💤 *No active trades open right now.*"
+
                             send_telegram(
-                                f"👑 *CoinDCX Top-12 Volatility Engine ({user_name})*\n\n"
-                                f"💰 Allocation: `₹{TRADE_INR_ALLOCATION:.0f} INR / trade`\n"
-                                f"🛡️ Risk Cap: `Max 2 Trades (₹220 total engaged)`\n"
-                                f"🪙 Active Coins: `12 High-Volume Pairs (SOL, DOGE, PEPE, SUI...)`\n"
-                                f"⚡ Engine: `1M Rapid Breakout Scanner`\n"
-                                f"🟢 Status: `Live & Scanning`",
+                                f"👑 *CoinDCX Engine Status ({user_name})*\n"
+                                f"💰 Per Trade: `₹{TRADE_INR_ALLOCATION:.0f} INR`\n"
+                                f"🛡️ Max Concurrent: `2 Positions`\n"
+                                f"━━━━━━━━━━━━━━━━━━━\n"
+                                f"📊 *CURRENT POSITION & PNL:*{pos_summary}\n"
+                                f"━━━━━━━━━━━━━━━━━━━\n"
+                                f"🟢 Engine: `Live & Monitoring`",
                                 chat_id=sender_id
                             )
                         else:
@@ -327,20 +347,3 @@ def handle_incoming_users():
         except Exception as e:
             print(f"Listener error: {e}")
         time.sleep(2)
-
-threading.Thread(target=handle_incoming_users, daemon=True).start()
-
-print("CoinDCX Top-12 High Volatility Engine Online...")
-send_telegram(
-    "🔥 *Top-12 High Volatility Engine Armed!*\n\n"
-    f"📦 Allocation: `₹{TRADE_INR_ALLOCATION:.0f} per trade`\n"
-    "🛡️ Risk Cap: Max 2 parallel trades (~₹220 engaged, ₹780 safe buffer)\n"
-    "🪙 Monitored Pairs: `SOL, XRP, DOGE, ADA, SHIB, PEPE, BONK, SUI, NEAR, AVAX, RENDER, TRX`"
-)
-
-while True:
-    for name, sym_cfg in SYMBOLS.items():
-        for strat_key, cfg in STRATEGIES.items():
-            check_strategy_for_symbol(strat_key, cfg, name, sym_cfg)
-            time.sleep(1)
-    time.sleep(3)
