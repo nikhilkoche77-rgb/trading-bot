@@ -89,9 +89,6 @@ def calculate_lot_size(qty, lot_contract):
 
 # --- SIP WEIGHT SIZING ENGINE ---
 def calculate_sip_weight_allocation(base_curr, inr_bal, usdt_bal):
-    """
-    Calculates dynamic trade amount based on active balance and weight factor.
-    """
     bal = inr_bal if base_curr == "INR" else usdt_bal
     raw_amount = bal * WEIGHT_ALLOCATION_PCT
     min_limit = MIN_TRADE_INR if base_curr == "INR" else MIN_TRADE_USDT
@@ -333,8 +330,6 @@ def calculate_technical_indicators(df, length=14):
 def generate_sip_breakdown_text(inr_bal, usdt_bal):
     inr_trade = calculate_sip_weight_allocation("INR", inr_bal, usdt_bal)
     usdt_trade = calculate_sip_weight_allocation("USDT", inr_bal, usdt_bal)
-    
-    # Sample calculation for SOL and BTC
     sol_qty_sample = inr_trade / 14000.0 if inr_trade > 0 else 0.0
     return (
         f"📋 SIP WEIGHT DYNAMIC BREAKDOWN\n"
@@ -439,4 +434,10 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
-            save_state(active_positions
+            save_state(active_positions)
+            return
+
+    # Trailing Stop Loss
+    if curr_price > pos["best_price"]:
+        pos["best_price"] = curr_price
+        new_sl =
