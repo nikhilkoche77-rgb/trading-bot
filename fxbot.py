@@ -4,10 +4,14 @@ import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from g4f.client import Client
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
-MY_CHAT_ID = "1345385952"  # Sirf aapka ID (Admin)
+MY_CHAT_ID = "1345385952"
+
+# Free AI Client (No Key, No Payment Needed)
+ai_client = Client()
 
 CURRENT_MODE = "SCALP"
 
@@ -52,80 +56,34 @@ active_positions = {
 
 def send_telegram(message, chat_id=MY_CHAT_ID):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": message}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Telegram error: {e}")
 
-# --- INCOMING TELEGRAM SMART LISTENER ---
-def get_smart_public_reply(user_name, text):
-    msg = text.lower()
-    
-    # 1. Greetings
-    if any(w in msg for w in ["hi", "hello", "hey", "namaste", "halo"]):
-        return (
-            f"Hello {user_name}! 👋\n\n"
-            f"Main ek **Algorithmic Trading & Analytics Engine** hoon.\n"
-            f"Aap mujhse strategy, indicators, timeframes ya market scanning ke baare me pooch sakte hain.\n\n"
-            f"Type karein `/help` saare available commands dekhne ke liye."
+# --- 100% FREE AI TRADING BRAIN ---
+def get_free_ai_trading_reply(user_question):
+    sys_prompt = (
+        "You are an expert Wall Street Algorithmic Trader. "
+        "Reply only to technical analysis, indicators, stock market, forex, crypto, and trading strategy questions in simple natural Hinglish. "
+        "Keep answers concise (max 3-4 bullet points). If the question is not about finance/trading, decline politely."
+    )
+    try:
+        response = ai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_question}
+            ],
+            web_search=False
         )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Free AI Error: {e}")
+        return "Filhal AI engine processing me hai, kripya 1 minute baad dobara sawal bhejein."
 
-    # 2. Strategy & Concept Questions
-    elif any(w in msg for w in ["strategy", "kaam", "working", "kaise", "logic", "setup"]):
-        return (
-            f"📊 *Strategy Architecture:*\n\n"
-            f"• **Trend Filter:** 15-Minute chart par EMA 50 & EMA 200 confluence.\n"
-            f"• **Entry Trigger:** 1-Minute chart par Swing High/Low Breakout.\n"
-            f"• **Strength Filter:** ADX (Average Directional Index) > 23.\n"
-            f"• **Risk Management:** Dynamic ATR Trailing Stop-Loss.\n\n"
-            f"Bot sideways market ko strictly avoid karta hai."
-        )
-
-    # 3. Indicators Details
-    elif any(w in msg for w in ["indicator", "ema", "adx", "atr", "rsi"]):
-        return (
-            f"🛠️ *Technical Indicators Used:*\n\n"
-            f"1. **EMA (Exponential Moving Average):** 50 aur 200 trend identify karne ke liye.\n"
-            f"2. **ADX (14):** Trend ki strength measure karta hai taaki choppy market me false breakout na mile.\n"
-            f"3. **ATR (14):** Market volatility ke according dynamic Stop Loss aur Trailing SL calculate karta hai."
-        )
-
-    # 4. Timeframe Questions
-    elif any(w in msg for w in ["timeframe", "tf", "scalp", "swing"]):
-        return (
-            f"⏱️ *Timeframe Logic:*\n\n"
-            f"• **Scalping Mode:** 15M (Trend Verification) + 1M (Micro Entry)\n"
-            f"• **Swing Mode:** 1D (Trend Verification) + 1H (Structure Entry)\n\n"
-            f"Higher timeframe hamesha trade direction decide karta hai."
-        )
-
-    # 5. Signals or Access Questions
-    elif any(w in msg for w in ["signal", "alert", "buy", "sell", "access", "join", "free"]):
-        return (
-            f"🔒 *Access Notice:*\n\n"
-            f"Live execution alerts aur direct trade calls filhal strictly **Private / Admin-Only** hain.\n"
-            f"Public users system ke mechanics aur strategies explore kar sakte hain."
-        )
-
-    # 6. Help command
-    elif "/help" in msg or "help" in msg:
-        return (
-            f"ℹ️ *Available Topics:*\n\n"
-            f"Aap niche diye gaye topics par pooch sakte hain:\n"
-            f"• `strategy` - Bot ka logic kaise kaam karta hai\n"
-            f"• `indicators` - Kaunse indicators use hote hain\n"
-            f"• `timeframe` - Scalping vs Swing timing\n"
-            f"• `status` - Bot live engine check"
-        )
-
-    # 7. Default Contextual Fallback (Same-Same reply nahi aayega)
-    else:
-        return (
-            f"Maine aapka message read kiya: *\"{text}\"*\n\n"
-            f"Yeh ek automated quantitative trading system hai. Trading strategy, indicators ya logic samajhne ke liye `/help` bhejein."
-        )
-
+# --- TELEGRAM INCOMING LISTENER ---
 def telegram_listener():
     last_update_id = 0
     while True:
@@ -142,27 +100,32 @@ def telegram_listener():
                         sender_id = str(update["message"]["chat"]["id"])
                         user_name = update["message"]["from"].get("first_name", "Trader")
 
-                        # Print user details in Render logs
-                        print(f"Chat: {user_name} ({sender_id}) -> {msg_text}")
+                        print(f"Query from {user_name}: {msg_text}")
 
-                        # Case 1: Agar Aap (Admin) hain
-                        if sender_id == MY_CHAT_ID:
-                            if msg_text == "/start" or msg_text.lower() == "status":
-                                reply = (
-                                    f"👋 *Welcome Boss ({user_name})!*\n\n"
-                                    f"🤖 *System Status:* `Online 24/7`\n"
-                                    f"⚙️ *Current Mode:* `{CFG['label']}`\n"
-                                    f"📊 *Assets Monitored:* `{len(SYMBOLS)} Pairs`\n"
-                                    f"🛡️ *Trailing SL Engine:* `Active`"
-                                )
-                                send_telegram(reply, chat_id=sender_id)
-                            else:
-                                send_telegram(f"🤖 Bot running smoothly! Type `/start` for admin control.", chat_id=sender_id)
-
-                        # Case 2: Agar Unknown / Public user hai (Accurate & Dynamic Reply)
-                        else:
-                            reply = get_smart_public_reply(user_name, msg_text)
+                        # Admin Command
+                        if sender_id == MY_CHAT_ID and msg_text in ["/start", "status"]:
+                            reply = (
+                                f"👋 Welcome Boss ({user_name})!\n\n"
+                                f"🤖 System Status: Online 24/7\n"
+                                f"⚙️ Mode: {CFG['label']}\n"
+                                f"📊 Monitored: {len(SYMBOLS)} Pairs\n"
+                                f"🧠 Free AI Trading Assistant: Active"
+                            )
                             send_telegram(reply, chat_id=sender_id)
+
+                        # Public / Any Trading Query
+                        else:
+                            if msg_text == "/start":
+                                welcome_msg = (
+                                    f"Hello {user_name}! 👋\n\n"
+                                    f"Main ek AI Trading Assistant aur Quantitative Engine hoon. "
+                                    f"Aap mujhse Trading, Indicators, Risk Management, ya Price Action "
+                                    f"se juda koi bhi sawal pooch sakte hain!"
+                                )
+                                send_telegram(welcome_msg, chat_id=sender_id)
+                            else:
+                                ai_reply = get_free_ai_trading_reply(msg_text)
+                                send_telegram(ai_reply, chat_id=sender_id)
 
         except Exception as e:
             print(f"Listener error: {e}")
@@ -231,9 +194,9 @@ def manage_trailing_sl(name, curr_price):
             new_sl = curr_price - trailing_gap
             if new_sl > pos["sl"]:
                 pos["sl"] = new_sl
-                send_telegram(f"🛡️ *TRAILING SL UPDATED (BUY)*\n🪙 Asset: `{name}`\n📈 High: `{pos['best_price']:.2f}`\n🛑 New SL: `{pos['sl']:.2f}`")
+                send_telegram(f"🛡️ TRAILING SL UPDATED (BUY)\n🪙 Asset: {name}\n📈 High: {pos['best_price']:.2f}\n🛑 New SL: {pos['sl']:.2f}")
         elif curr_price <= pos["sl"]:
-            send_telegram(f"🔴 *EXIT HIT (STOP LOSS)*\n🪙 Asset: `{name}`\n💵 Exit: `{curr_price:.2f}`\n🛑 SL Hit: `{pos['sl']:.2f}`")
+            send_telegram(f"🔴 EXIT HIT (STOP LOSS)\n🪙 Asset: {name}\n💵 Exit: {curr_price:.2f}\n🛑 SL Hit: {pos['sl']:.2f}")
             pos["side"] = None
 
     elif pos["side"] == "SELL":
@@ -242,9 +205,9 @@ def manage_trailing_sl(name, curr_price):
             new_sl = curr_price + trailing_gap
             if new_sl < pos["sl"]:
                 pos["sl"] = new_sl
-                send_telegram(f"🛡️ *TRAILING SL UPDATED (SELL)*\n🪙 Asset: `{name}`\n📉 Low: `{pos['best_price']:.2f}`\n🛑 New SL: `{pos['sl']:.2f}`")
+                send_telegram(f"🛡️ TRAILING SL UPDATED (SELL)\n🪙 Asset: {name}\n📉 Low: {pos['best_price']:.2f}\n🛑 New SL: {pos['sl']:.2f}")
         elif curr_price >= pos["sl"]:
-            send_telegram(f"🔴 *EXIT HIT (STOP LOSS)*\n🪙 Asset: `{name}`\n💵 Exit: `{curr_price:.2f}`\n🛑 SL Hit: `{pos['sl']:.2f}`")
+            send_telegram(f"🔴 EXIT HIT (STOP LOSS)\n🪙 Asset: {name}\n💵 Exit: {curr_price:.2f}\n🛑 SL Hit: {pos['sl']:.2f}")
             pos["side"] = None
 
 def check_market(name, ticker_symbol):
@@ -282,8 +245,6 @@ def check_market(name, ticker_symbol):
 
         manage_trailing_sl(name, curr_price)
 
-        print(f"[{CURRENT_MODE}] {name:<14} | Price: {curr_price:<9.2f} | ADX: {curr_adx:.1f} | ATR: {curr_atr:.2f} | HTF: {htf_trend}")
-
         strong_trend = curr_adx > CFG["adx_min"]
         active_pos = active_positions[name]["side"]
 
@@ -296,18 +257,18 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"🚀 *{CFG['label']} BUY ALERT*\n\n"
-                    f"🪙 *Asset:* `{name}`\n"
-                    f"📈 *HTF Trend:* `15M Bullish`\n"
-                    f"💵 *Entry:* `{curr_price:.2f}`\n"
-                    f"🛑 *Dynamic SL:* `{sl:.2f}`\n"
-                    f"📊 *ATR:* `{curr_atr:.2f}`\n\n"
-                    f"🎯 *TARGETS:*\n"
-                    f"• TP 1 (1:1.5): `{curr_price + (risk * 1.5):.2f}`\n"
-                    f"• TP 2 (1:2.0): `{curr_price + (risk * 2.0):.2f}`\n"
-                    f"• TP 3 (1:3.0): `{curr_price + (risk * 3.0):.2f}`\n"
-                    f"• TP 4 (1:5.0): `{curr_price + (risk * 5.0):.2f}`\n\n"
-                    f"⚡ *ADX:* `{curr_adx:.1f}` | 🛡️ *Trailing SL:* `Active`"
+                    f"🚀 {CFG['label']} BUY ALERT\n\n"
+                    f"🪙 Asset: {name}\n"
+                    f"📈 HTF Trend: 15M Bullish\n"
+                    f"💵 Entry: {curr_price:.2f}\n"
+                    f"🛑 Dynamic SL: {sl:.2f}\n"
+                    f"📊 ATR: {curr_atr:.2f}\n\n"
+                    f"🎯 TARGETS:\n"
+                    f"• TP 1: {curr_price + (risk * 1.5):.2f}\n"
+                    f"• TP 2: {curr_price + (risk * 2.0):.2f}\n"
+                    f"• TP 3: {curr_price + (risk * 3.0):.2f}\n"
+                    f"• TP 4: {curr_price + (risk * 5.0):.2f}\n\n"
+                    f"⚡ ADX: {curr_adx:.1f}"
                 )
                 send_telegram(msg)
 
@@ -320,30 +281,30 @@ def check_market(name, ticker_symbol):
             if risk > 0:
                 active_positions[name] = {"side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr}
                 msg = (
-                    f"⚠️ *{CFG['label']} SELL ALERT*\n\n"
-                    f"🪙 *Asset:* `{name}`\n"
-                    f"📉 *HTF Trend:* `15M Bearish`\n"
-                    f"💵 *Entry:* `{curr_price:.2f}`\n"
-                    f"🛑 *Dynamic SL:* `{sl:.2f}`\n"
-                    f"📊 *ATR:* `{curr_atr:.2f}`\n\n"
-                    f"🎯 *TARGETS:*\n"
-                    f"• TP 1 (1:1.5): `{curr_price - (risk * 1.5):.2f}`\n"
-                    f"• TP 2 (1:2.0): `{curr_price - (risk * 2.0):.2f}`\n"
-                    f"• TP 3 (1:3.0): `{curr_price - (risk * 3.0):.2f}`\n"
-                    f"• TP 4 (1:5.0): `{curr_price - (risk * 5.0):.2f}`\n\n"
-                    f"⚡ *ADX:* `{curr_adx:.1f}` | 🛡️ *Trailing SL:* `Active`"
+                    f"⚠️ {CFG['label']} SELL ALERT\n\n"
+                    f"🪙 Asset: {name}\n"
+                    f"📉 HTF Trend: 15M Bearish\n"
+                    f"💵 Entry: {curr_price:.2f}\n"
+                    f"🛑 Dynamic SL: {sl:.2f}\n"
+                    f"📊 ATR: {curr_atr:.2f}\n\n"
+                    f"🎯 TARGETS:\n"
+                    f"• TP 1: {curr_price - (risk * 1.5):.2f}\n"
+                    f"• TP 2: {curr_price - (risk * 2.0):.2f}\n"
+                    f"• TP 3: {curr_price - (risk * 3.0):.2f}\n"
+                    f"• TP 4: {curr_price - (risk * 5.0):.2f}\n\n"
+                    f"⚡ ADX: {curr_adx:.1f}"
                 )
                 send_telegram(msg)
 
     except Exception as e:
         print(f"Error on {name}: {e}")
 
-# Separate background thread for incoming messages
+# Run Free AI Listener
 listener_thread = threading.Thread(target=telegram_listener, daemon=True)
 listener_thread.start()
 
-print("Auto-Reply & Scanner Live...")
-send_telegram("🔥 *Bot Updated with Auto-Reply & Access Security!*\nSend /start to test.")
+print("Zero-Cost AI Scanner Live...")
+send_telegram("🔥 Zero-Cost Free AI Engine Live 24/7!")
 
 while True:
     for name, ticker in SYMBOLS.items():
