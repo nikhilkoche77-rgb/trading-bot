@@ -1,18 +1,28 @@
 import time
+import hmac
+import hashlib
+import json
+import os
 import threading
 import requests
+import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
-MY_CHAT_ID = "1345385952"
+ADMIN_CHAT_IDS = [
+    "1345385952",           # Admin 1 (Aap)
+    "SECOND_USER_CHAT_ID"   # Admin 2 (Dusre person ki Telegram ID)
+]
 
-# --- FREE PAPER TRADING ACCOUNT (VIRTUAL FUNDS) ---
-virtual_balance = 10000.0  # $10,000 Fake Demo Balance
-TRADE_RISK_PERCENT = 2.0   # Har trade me 2% risk
+# --- COINDCX API CREDENTIALS ---
+# Render Environment se uthayega, ya fallback string use karega
+COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
+COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
+# --- STRATEGY CONFIGURATION ---
 STRATEGIES = {
     "SCALP": {
         "label": "⚡ [SCALP - 15M/5M/1M]",
@@ -49,17 +59,15 @@ STRATEGIES = {
     }
 }
 
+# CoinDCX Market Pairs & Fixed Trade Quantity (Apne capital ke hisab se set karein)
 SYMBOLS = {
-    "BTC/USD": "BTC-USD",
-    "ETH/USD": "ETH-USD",
-    "SOL/USD": "SOL-USD",
-    "BNB/USD": "BNB-USD",
-    "XRP/USD": "XRP-USD",
-    "ADA/USD": "ADA-USD",
-    "DOGE/USD": "DOGE-USD"
+    "BTC/INR": {"yf": "BTC-USD", "coindcx": "BTCINR", "qty": 0.0005},
+    "ETH/INR": {"yf": "ETH-USD", "coindcx": "ETHINR", "qty": 0.008},
+    "SOL/INR": {"yf": "SOL-USD", "coindcx": "SOLINR", "qty": 0.15},
+    "DOGE/INR": {"yf": "DOGE-USD", "coindcx": "DOGEINR", "qty": 100.0}
 }
 
-# Track virtual positions
+# Live Active Positions
 active_positions = {
     strat_key: {
         name: {"side": None, "entry": 0.0, "sl": 0.0, "best_price": 0.0, "atr": 0.0, "qty": 0.0}
@@ -68,16 +76,54 @@ active_positions = {
     for strat_key in STRATEGIES
 }
 
-def send_telegram(message, chat_id=MY_CHAT_ID):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+# --- COINDCX ORDER EXECUTION ENGINE ---
+def place_coindcx_order(market_pair, side, quantity, price_per_unit):
+    """
+    CoinDCX API par HMAC-SHA256 signature generate karke real order execute karta hai
+    """
+    url = "https://api.coindcx.com/exchange/v1/orders/create"
+    timeStamp = int(round(time.time() * 1000))
+    
+    body = {
+        "side": side.lower(),               # 'buy' or 'sell'
+        "order_type": "market_order",       # instant market fill
+        "market": market_pair,              # e.g., 'BTCINR'
+        "total_quantity": quantity,
+        "timestamp": timeStamp
+    }
+    
+    json_payload = json.dumps(body, separators=(',', ':'))
+    signature = hmac.new(COINDCX_SECRET.encode('utf-8'), json_payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'X-AUTH-APIKEY': COINDCX_KEY,
+        'X-AUTH-SIGNATURE': signature
+    }
+    
     try:
-        requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, data=json_payload, headers=headers, timeout=10)
+        res_data = response.json()
+        if response.status_code == 200:
+            return True, res_data
+        else:
+            return False, res_data.get("message", str(res_data))
     except Exception as e:
-        print(f"Telegram error: {e}")
+        return False, str(e)
+
+# --- TELEGRAM ENGINE (DUAL-ADMIN SUPPORT) ---
+def send_telegram(message, chat_id=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    recipients = [chat_id] if chat_id else [cid for cid in ADMIN_CHAT_IDS if cid != "SECOND_USER_CHAT_ID"]
+    
+    for cid in recipients:
+        payload = {"chat_id": cid, "text": message, "parse_mode": "Markdown"}
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Telegram error to {cid}: {e}")
 
 def handle_incoming_users():
-    global virtual_balance
     last_update_id = 0
     while True:
         try:
@@ -92,27 +138,22 @@ def handle_incoming_users():
                         sender_id = str(update["message"]["chat"]["id"])
                         user_name = update["message"]["from"].get("first_name", "Trader")
 
-                        if sender_id == MY_CHAT_ID:
+                        if sender_id in ADMIN_CHAT_IDS:
                             send_telegram(
-                                f"👑 *Admin Dashboard ({user_name})*\n\n"
-                                f"🤖 Mode: `100% Free Paper Trading`\n"
-                                f"💰 Virtual Balance: `${virtual_balance:,.2f} USDT`\n"
-                                f"🎯 Status: `Auto Entry/Exit Active`\n"
-                                f"📊 Assets: `{len(SYMBOLS)} Cryptos Monitored`",
+                                f"👑 *CoinDCX Live Engine ({user_name})*\n\n"
+                                f"🤖 Status: `Online & Armed`\n"
+                                f"⚡ Engine: `Scalp | Intraday | Swing`\n"
+                                f"🪙 Execution: `CoinDCX API Connected`\n"
+                                f"🛡️ Trailing SL: `Active`",
                                 chat_id=sender_id
                             )
                         else:
-                            public_notice = (
-                                f"Hello {user_name}! 👋\n\n"
-                                f"⚠️ *Private Auto-Execution Engine*\n"
-                                f"Access is restricted to authorized accounts.\n\n"
-                                f"🔒 *Access:* Closed"
-                            )
-                            send_telegram(public_notice, chat_id=sender_id)
+                            send_telegram(f"Hello {user_name}! 🔒 Private bot. Access restricted.", chat_id=sender_id)
         except Exception as e:
             print(f"Listener issue: {e}")
         time.sleep(2)
 
+# --- INDICATOR CALCULATIONS ---
 def calculate_atr_and_adx(df, length=14):
     high = pd.Series(np.array(df['High']).flatten(), index=df.index)
     low = pd.Series(np.array(df['Low']).flatten(), index=df.index)
@@ -142,7 +183,6 @@ def get_trend(ticker_symbol, period, interval):
         data = yf.download(ticker_symbol, period=period, interval=interval, progress=False)
         if data is None or len(data) < 30:
             return "NEUTRAL"
-
         df = data.copy()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -160,13 +200,15 @@ def get_trend(ticker_symbol, period, interval):
     except Exception:
         return "NEUTRAL"
 
-def manage_trailing_sl(strat_key, strat_label, name, curr_price):
-    global virtual_balance
+# --- POSITION & TRAILING SL MANAGEMENT ---
+def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
     pos = active_positions[strat_key][name]
     if pos["side"] is None:
         return
 
     trailing_gap = pos["atr"] * 1.5
+    coindcx_pair = sym_cfg["coindcx"]
+    qty = pos["qty"]
 
     if pos["side"] == "BUY":
         if curr_price > pos["best_price"]:
@@ -175,64 +217,40 @@ def manage_trailing_sl(strat_key, strat_label, name, curr_price):
             if new_sl > pos["sl"]:
                 pos["sl"] = new_sl
                 send_telegram(
-                    f"🛡️ *TRAILING SL UPDATED (BUY)*\n"
-                    f"🏷️ Strategy: `{strat_label}`\n"
-                    f"🪙 Asset: `{name}`\n"
-                    f"📈 High: `{pos['best_price']:.4f}`\n"
-                    f"🛑 New SL: `{pos['sl']:.4f}`"
+                    f"🛡️ *TRAILING SL RAISED*\n"
+                    f"🏷️ `{strat_label}` | `{name}`\n"
+                    f"📈 High: `{pos['best_price']:.2f}`\n"
+                    f"🛑 New SL: `{pos['sl']:.2f}`"
                 )
         elif curr_price <= pos["sl"]:
-            # Auto Virtual Exit
-            pnl = (curr_price - pos["entry"]) * pos["qty"]
-            virtual_balance += pnl
-            pnl_text = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-            send_telegram(
-                f"🔴 *AUTO EXIT HIT (CLOSED)*\n\n"
-                f"🏷️ Strategy: `{strat_label}`\n"
-                f"🪙 Asset: `{name}`\n"
-                f"💵 Exit Price: `{curr_price:.4f}`\n"
-                f"📊 PnL: `{pnl_text}`\n"
-                f"💰 Balance: `${virtual_balance:,.2f} USDT`"
-            )
-            pos["side"] = None
-
-    elif pos["side"] == "SELL":
-        if curr_price < pos["best_price"]:
-            pos["best_price"] = curr_price
-            new_sl = curr_price + trailing_gap
-            if new_sl < pos["sl"]:
-                pos["sl"] = new_sl
+            # Trigger Real Sell Order on CoinDCX
+            success, resp = place_coindcx_order(coindcx_pair, "sell", qty, curr_price)
+            if success:
                 send_telegram(
-                    f"🛡️ *TRAILING SL UPDATED (SELL)*\n"
+                    f"🛑 *COINDCX POSITION CLOSED (SL HIT)*\n\n"
                     f"🏷️ Strategy: `{strat_label}`\n"
-                    f"🪙 Asset: `{name}`\n"
-                    f"📉 Low: `{pos['best_price']:.4f}`\n"
-                    f"🛑 New SL: `{pos['sl']:.4f}`"
+                    f"🪙 Pair: `{coindcx_pair}`\n"
+                    f"💵 Exit Price: `{curr_price:.2f}`\n"
+                    f"📦 Sold Units: `{qty}`\n"
+                    f"✅ Order Status: `Filled on CoinDCX`"
                 )
-        elif curr_price >= pos["sl"]:
-            pnl = (pos["entry"] - curr_price) * pos["qty"]
-            virtual_balance += pnl
-            pnl_text = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-            send_telegram(
-                f"🔴 *AUTO EXIT HIT (CLOSED)*\n\n"
-                f"🏷️ Strategy: `{strat_label}`\n"
-                f"🪙 Asset: `{name}`\n"
-                f"💵 Exit Price: `{curr_price:.4f}`\n"
-                f"📊 PnL: `{pnl_text}`\n"
-                f"💰 Balance: `${virtual_balance:,.2f} USDT`"
-            )
-            pos["side"] = None
+                pos["side"] = None
+            else:
+                send_telegram(f"⚠️ *Exit Execution Failed on CoinDCX:* `{resp}`")
 
-def check_strategy_for_symbol(strat_key, cfg, name, ticker_symbol):
-    global virtual_balance
+def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
     try:
-        htf_trend = get_trend(ticker_symbol, cfg["htf_period"], cfg["htf_interval"])
-        mtf_trend = get_trend(ticker_symbol, cfg["mtf_period"], cfg["mtf_interval"])
+        ticker = sym_cfg["yf"]
+        coindcx_pair = sym_cfg["coindcx"]
+        qty = sym_cfg["qty"]
+
+        htf_trend = get_trend(ticker, cfg["htf_period"], cfg["htf_interval"])
+        mtf_trend = get_trend(ticker, cfg["mtf_period"], cfg["mtf_interval"])
 
         if htf_trend != mtf_trend or htf_trend == "NEUTRAL":
             return
 
-        data = yf.download(ticker_symbol, period=cfg["entry_period"], interval=cfg["entry_interval"], progress=False)
+        data = yf.download(ticker, period=cfg["entry_period"], interval=cfg["entry_interval"], progress=False)
         if data is None or len(data) < 50:
             return
 
@@ -261,81 +279,56 @@ def check_strategy_for_symbol(strat_key, cfg, name, ticker_symbol):
         swing_h = float(df['swing_high'].iloc[-1])
         swing_l = float(df['swing_low'].iloc[-1])
 
-        manage_trailing_sl(strat_key, cfg["label"], name, curr_price)
+        manage_trailing_sl(strat_key, cfg["label"], name, sym_cfg, curr_price)
 
         strong_trend = curr_adx > cfg["adx_min"]
         active_pos = active_positions[strat_key][name]["side"]
         tp_mults = cfg["tp_multipliers"]
 
-        # BUY SETUP -> AUTO VIRTUAL ENTRY
+        # BUY SETUP -> AUTO ORDER ON COINDCX
         if (active_pos is None) and (htf_trend == "BULLISH") and strong_trend and (curr_ema50 > curr_ema93) and (curr_price > swing_h) and (curr_price > curr_open):
             atr_sl = curr_price - (curr_atr * 1.5)
             sl = max(swing_l, atr_sl)
             risk = curr_price - sl
 
             if risk > 0:
-                risk_amount = virtual_balance * (TRADE_RISK_PERCENT / 100)
-                qty = risk_amount / risk
-
-                active_positions[strat_key][name] = {
-                    "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
-                }
-                msg = (
-                    f"🟢 *AUTO TRADE OPENED (BUY)*\n\n"
-                    f"🏷️ Strategy: `{cfg['label']}`\n"
-                    f"🪙 Asset: `{name}`\n"
-                    f"💵 Entry: `{curr_price:.4f}`\n"
-                    f"📦 Units: `{qty:.4f}`\n"
-                    f"🛑 Stop Loss: `{sl:.4f}`\n"
-                    f"🎯 TP 1: `{curr_price + (risk * tp_mults[0]):.4f}`\n"
-                    f"🎯 TP 2: `{curr_price + (risk * tp_mults[1]):.4f}`\n\n"
-                    f"🛡️ *Trailing SL:* `Active`"
-                )
-                send_telegram(msg)
-
-        # SELL SETUP -> AUTO VIRTUAL ENTRY
-        elif (active_pos is None) and (htf_trend == "BEARISH") and strong_trend and (curr_ema50 < curr_ema93) and (curr_price < swing_l) and (curr_price < curr_open):
-            atr_sl = curr_price + (curr_atr * 1.5)
-            sl = min(swing_h, atr_sl)
-            risk = sl - curr_price
-
-            if risk > 0:
-                risk_amount = virtual_balance * (TRADE_RISK_PERCENT / 100)
-                qty = risk_amount / risk
-
-                active_positions[strat_key][name] = {
-                    "side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
-                }
-                msg = (
-                    f"🔴 *AUTO TRADE OPENED (SELL)*\n\n"
-                    f"🏷️ Strategy: `{cfg['label']}`\n"
-                    f"🪙 Asset: `{name}`\n"
-                    f"💵 Entry: `{curr_price:.4f}`\n"
-                    f"📦 Units: `{qty:.4f}`\n"
-                    f"🛑 Stop Loss: `{sl:.4f}`\n"
-                    f"🎯 TP 1: `{curr_price - (risk * tp_mults[0]):.4f}`\n"
-                    f"🎯 TP 2: `{curr_price - (risk * tp_mults[1]):.4f}`\n\n"
-                    f"🛡️ *Trailing SL:* `Active`"
-                )
-                send_telegram(msg)
+                # Real order send to CoinDCX
+                success, resp = place_coindcx_order(coindcx_pair, "buy", qty, curr_price)
+                if success:
+                    active_positions[strat_key][name] = {
+                        "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
+                    }
+                    msg = (
+                        f"🚀 *REAL TRADE EXECUTED (COINDCX)*\n\n"
+                        f"🏷️ Strategy: `{cfg['label']}`\n"
+                        f"🪙 Market: `{coindcx_pair}`\n"
+                        f"💵 Entry Level: `{curr_price:.2f}`\n"
+                        f"📦 Quantity: `{qty}`\n"
+                        f"🛑 Trailing SL: `{sl:.2f}`\n"
+                        f"🎯 TP 1: `{curr_price + (risk * tp_mults[0]):.2f}`\n"
+                        f"🎯 TP 2: `{curr_price + (risk * tp_mults[1]):.2f}`\n\n"
+                        f"⚡ Status: `Order Filled via API`"
+                    )
+                    send_telegram(msg)
+                else:
+                    print(f"CoinDCX Buy Rejected for {name}: {resp}")
 
     except Exception as e:
         print(f"Error on [{strat_key}] {name}: {e}")
 
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 
-print("Free Paper Trading Engine Online...")
+print("CoinDCX Auto Engine Active...")
 send_telegram(
-    "🎉 *Free Auto-Trading Engine Active!*\n\n"
-    "💰 Starting Virtual Balance: `$10,000 USDT`\n"
-    "⚡ Auto Entries, Dynamic Trailing SL & Exit tracking enabled.\n\n"
-    "Zero financial risk. Scanning market 24/7..."
+    "⚡ *CoinDCX Algorithmic Engine Live!*\n\n"
+    "• Authenticated via HMAC-SHA256 API.\n"
+    "• Live Auto Buy, Trailing Stop Loss & Exit Enabled.\n\n"
+    "Scanning Pairs..."
 )
 
 while True:
-    print("Scanning active pairs for entry triggers...")
-    for name, ticker in SYMBOLS.items():
+    for name, sym_cfg in SYMBOLS.items():
         for strat_key, cfg in STRATEGIES.items():
-            check_strategy_for_symbol(strat_key, cfg, name, ticker)
+            check_strategy_for_symbol(strat_key, cfg, name, sym_cfg)
             time.sleep(1)
     time.sleep(5)
