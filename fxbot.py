@@ -23,27 +23,34 @@ COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
 # --- DUAL-ENGINE RISK PARAMETERS ---
 TRADE_INR_ALLOCATION = 110.0   # ₹110 per trade for INR pairs
-TRADE_USDT_ALLOCATION = 1.30   # $1.30 per trade for USDT pairs (~₹110)
-MAX_PARALLEL_TRADES = 2        # Maximum 2 concurrent trades total
-DAILY_MAX_LOSS_INR = 30.0      # ₹30 total loss stop
-COOL_OFF_MINUTES = 20          # Anti-whipsaw delay
-MAX_SPREAD_TOLERANCE_PCT = 0.45
+TRADE_USDT_ALLOCATION = 1.30   # ~$1.30 per trade for USDT pairs
+MAX_PARALLEL_TRADES = 2        # Maximum 2 concurrent trades across both markets
+DAILY_MAX_LOSS_INR = 30.0      # ₹30 hard daily loss kill-switch
+COOL_OFF_MINUTES = 20          # 20-minute cool-off after Stop Loss
+MAX_SPREAD_TOLERANCE_PCT = 0.45 # Skip order if spread > 0.45%
 
 STATE_FILE = "trades_state.json"
 is_paused = False
 daily_realized_pnl_inr = 0.0
 cool_off_tracker = {}
 
-# --- DUAL UNIVERSE: INR & USDT/USD PAIRS ---
+# --- DUAL UNIVERSE: HIGH-VOLUME USDT & INR PAIRS ---
 SYMBOLS = {
-    # === GLOBAL USD / USDT PAIRS ===
+    # === HIGH-MOMENTUM & LIQUID USDT/USD PAIRS ===
     "BTC/USDT": {"base_curr": "USDT", "binance": "BTCUSDT", "pair": "B-BTC_USDT", "coindcx": "BTCUSDT", "step": 5},
     "ETH/USDT": {"base_curr": "USDT", "binance": "ETHUSDT", "pair": "B-ETH_USDT", "coindcx": "ETHUSDT", "step": 4},
     "SOL/USDT": {"base_curr": "USDT", "binance": "SOLUSDT", "pair": "B-SOL_USDT", "coindcx": "SOLUSDT", "step": 3},
-    "GOLD/USDT": {"base_curr": "USDT", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4},
+    "XAU/USDT": {"base_curr": "USDT", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4}, # Spot Gold Token
     "DOGE/USDT": {"base_curr": "USDT", "binance": "DOGEUSDT", "pair": "B-DOGE_USDT", "coindcx": "DOGEUSDT", "step": 0},
     "XRP/USDT": {"base_curr": "USDT", "binance": "XRPUSDT", "pair": "B-XRP_USDT", "coindcx": "XRPUSDT", "step": 1},
+    "PEPE/USDT": {"base_curr": "USDT", "binance": "PEPEUSDT", "pair": "B-PEPE_USDT", "coindcx": "PEPEUSDT", "step": 0},
+    "SHIB/USDT": {"base_curr": "USDT", "binance": "SHIBUSDT", "pair": "B-SHIB_USDT", "coindcx": "SHIBUSDT", "step": 0},
     "SUI/USDT": {"base_curr": "USDT", "binance": "SUIUSDT", "pair": "B-SUI_USDT", "coindcx": "SUIUSDT", "step": 1},
+    "NEAR/USDT": {"base_curr": "USDT", "binance": "NEARUSDT", "pair": "B-NEAR_USDT", "coindcx": "NEARUSDT", "step": 2},
+    "AVAX/USDT": {"base_curr": "USDT", "binance": "AVAXUSDT", "pair": "B-AVAX_USDT", "coindcx": "AVAXUSDT", "step": 2},
+    "WIF/USDT": {"base_curr": "USDT", "binance": "WIFUSDT", "pair": "B-WIF_USDT", "coindcx": "WIFUSDT", "step": 2},
+    "LINK/USDT": {"base_curr": "USDT", "binance": "LINKUSDT", "pair": "B-LINK_USDT", "coindcx": "LINKUSDT", "step": 2},
+    "FTM/USDT": {"base_curr": "USDT", "binance": "FTMUSDT", "pair": "B-FTM_USDT", "coindcx": "FTMUSDT", "step": 1},
 
     # === DIRECT INR PAIRS ===
     "BTC/INR": {"base_curr": "INR", "binance": "BTCUSDT", "pair": "B-BTC_INR", "coindcx": "BTCINR", "step": 5},
@@ -55,7 +62,6 @@ SYMBOLS = {
     "ADA/INR": {"base_curr": "INR", "binance": "ADAUSDT", "pair": "B-ADA_INR", "coindcx": "ADAINR", "step": 1},
     "PEPE/INR": {"base_curr": "INR", "binance": "PEPEUSDT", "pair": "B-PEPE_INR", "coindcx": "PEPEINR", "step": 0},
     "BONK/INR": {"base_curr": "INR", "binance": "BONKUSDT", "pair": "B-BONK_INR", "coindcx": "BONKINR", "step": 0},
-    "NEAR/INR": {"base_curr": "INR", "binance": "NEARUSDT", "pair": "B-NEAR_INR", "coindcx": "NEARINR", "step": 2},
     "RENDER/INR": {"base_curr": "INR", "binance": "RENDERUSDT", "pair": "B-RENDER_INR", "coindcx": "RENDERINR", "step": 2}
 }
 
@@ -174,7 +180,7 @@ def emergency_close_all():
     save_state(active_positions)
     return closed_count
 
-# --- BTC FILTER & SPREAD INSPECTION ---
+# --- BTC MARKET HEALTH & SPREAD INSPECTION ---
 def is_btc_healthy():
     try:
         url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
@@ -211,7 +217,7 @@ def check_market_spread(pair_name):
         pass
     return True
 
-# --- BINANCE LEAD SCANNER ---
+# --- BINANCE LEAD SIGNAL SCANNER ---
 def check_binance_lead_signal(symbol_binance):
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
@@ -234,7 +240,7 @@ def check_binance_lead_signal(symbol_binance):
         pass
     return False, 0.0
 
-# --- TECHNICAL ENGINE ---
+# --- TECHNICAL ANALYSIS ENGINE ---
 def fetch_coindcx_candles(pair_name, interval="1m", limit=35):
     try:
         url = f"https://public.coindcx.com/market_data/candles?pair={pair_name}&interval={interval}&limit={limit}"
@@ -281,20 +287,21 @@ def generate_status_text(user_name="Trader"):
                 f"SL: {curr_sym}{pos['sl']:.4f} | PnL: {pnl_pct:+.2f}%\n"
             )
     if not has_active:
-        pos_summary = "\n💤 No active positions."
+        pos_summary = "\n💤 No active trades open right now."
 
     active_count = sum(1 for p in active_positions.values() if p.get("side") is not None)
     return (
-        f"👑 Dual-Market Engine ({user_name})\n"
+        f"👑 Dual-Market Lead Engine ({user_name})\n"
         f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ACTIVE'}\n"
         f"Open Trades: {active_count}/{MAX_PARALLEL_TRADES}\n"
-        f"Est Realized PnL: ₹{daily_realized_pnl_inr:.2f}\n"
+        f"Realized PnL (Today): ₹{daily_realized_pnl_inr:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"ACTIVE TRADES:{pos_summary}\n"
-        f"━━━━━━━━━━━━━━━━━━━"
+        f"CURRENT POSITIONS:{pos_summary}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"Touch any button below to manage:"
     )
 
-# --- TRADE EXECUTION ---
+# --- TRADE TRAILING & RISK ENGINE ---
 def manage_trailing_sl(name, sym_cfg, curr_price):
     global daily_realized_pnl_inr, cool_off_tracker
     pos = active_positions[name]
@@ -306,13 +313,13 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
     qty = pos["qty"]
     curr_sym = "$" if sym_cfg["base_curr"] == "USDT" else "₹"
 
-    # Breakeven Lock
+    # Breakeven Protection
     if curr_price >= (pos["entry"] + pos["atr"]) and pos["sl"] < pos["entry"]:
         pos["sl"] = pos["entry"]
         save_state(active_positions)
         send_telegram(f"🛡️ BREAKEVEN ACTIVATED\nPair: {name}\nSL locked to Entry: {curr_sym}{pos['entry']:.4f}")
 
-    # Trailing SL
+    # Trailing Stop Loss
     if curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
         new_sl = curr_price - trailing_gap
@@ -324,7 +331,7 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
         if success:
             trade_pnl = (curr_price - pos["entry"]) * qty
             if sym_cfg["base_curr"] == "USDT":
-                daily_realized_pnl_inr += (trade_pnl * 90.0)  # Approx convert to INR
+                daily_realized_pnl_inr += (trade_pnl * 90.0)  # Convert USDT PnL to INR approx
             else:
                 daily_realized_pnl_inr += trade_pnl
 
@@ -332,9 +339,9 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
             send_telegram(
                 f"🛑 AUTO-EXIT (SL/Target Hit)\n\n"
                 f"Pair: {name}\n"
-                f"Sold Price: {curr_sym}{curr_price:.4f}\n"
+                f"Exit Price: {curr_sym}{curr_price:.4f}\n"
                 f"PnL: {curr_sym}{trade_pnl:.2f}\n"
-                f"Funds auto-credited to CoinDCX {sym_cfg['base_curr']} Wallet.",
+                f"Cooldown: {COOL_OFF_MINUTES} mins active for this pair.",
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
@@ -350,14 +357,14 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
     if name in cool_off_tracker and time.time() < cool_off_tracker[name]:
         return
 
-    # Check Currency Balance Availability
+    # Balance Verification
     base_curr = sym_cfg["base_curr"]
     if base_curr == "INR" and inr_bal < TRADE_INR_ALLOCATION:
         return
     if base_curr == "USDT" and usdt_bal < TRADE_USDT_ALLOCATION:
         return
 
-    # Check BTC Market Condition
+    # BTC Health Check
     if not is_btc_healthy():
         return
 
@@ -366,10 +373,11 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
     binance_symbol = sym_cfg["binance"]
     precision = sym_cfg["step"]
 
-    # Check Spread
+    # Spread Protection
     if not check_market_spread(pair_code):
         return
 
+    # Binance Early Surge Check
     binance_surging, surge_gain = check_binance_lead_signal(binance_symbol)
 
     df = fetch_coindcx_candles(pair_code, interval="1m", limit=35)
@@ -414,12 +422,12 @@ def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
                 save_state(active_positions)
                 curr_sym = "$" if base_curr == "USDT" else "₹"
                 send_telegram(
-                    f"⚡ DUAL-ENGINE BUY EXECUTED\n\n"
+                    f"⚡ DUAL-MARKET ENTRY EXECUTED\n\n"
                     f"Pair: {name} ({base_curr})\n"
                     f"Binance Surge: +{surge_gain:.2f}%\n"
-                    f"Price: {curr_sym}{curr_price:.4f}\n"
-                    f"Units: {qty}\n"
-                    f"SL: {curr_sym}{sl:.4f}",
+                    f"Local Price: {curr_sym}{curr_price:.4f}\n"
+                    f"Qty: {qty}\n"
+                    f"Initial SL: {curr_sym}{sl:.4f}",
                     reply_markup=get_control_keyboard()
                 )
 
@@ -432,7 +440,7 @@ def midnight_reset_scheduler():
         next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
         time.sleep((next_run - now).total_seconds())
 
-        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL: ₹{daily_realized_pnl_inr:.2f}\nDrawdown guard reset."
+        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL Today: ₹{daily_realized_pnl_inr:.2f}\nDaily drawdown counter reset."
         send_telegram(report)
         daily_realized_pnl_inr = 0.0
         cool_off_tracker.clear()
@@ -471,15 +479,15 @@ def handle_incoming_users():
                             elif cb_data == "cmd_pause":
                                 is_paused = True
                                 answer_callback_query(cb["id"], "Paused")
-                                send_telegram("⏸️ Bot Paused.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                send_telegram("⏸️ Bot Paused. New entries locked.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_resume":
                                 is_paused = False
                                 answer_callback_query(cb["id"], "Resumed")
-                                send_telegram("▶️ Bot Active.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                send_telegram("▶️ Bot Active. Scanning pairs.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_close_all":
                                 answer_callback_query(cb["id"], "Exiting All")
                                 count = emergency_close_all()
-                                send_telegram(f"🚨 Panic Close: Exited {count} positions.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                send_telegram(f"🚨 Panic Close: Exited {count} positions at market price.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data.startswith("sell_"):
                                 target_pair = cb_data.replace("sell_", "")
                                 if target_pair in active_positions and active_positions[target_pair].get("side") is not None:
@@ -517,8 +525,8 @@ def handle_incoming_users():
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
 
-print("Dual-Engine Online (INR + USD/USDT)...")
-send_telegram("🔥 CoinDCX Dual-Market Engine Armed!\nScanning both INR & USDT pairs with Binance Lead.", reply_markup=get_control_keyboard())
+print("Master Dual-Market Engine Online...")
+send_telegram("🔥 CoinDCX Dual-Market Engine Online!\nTracking INR & USDT (Gold + High-Momentum Pairs).", reply_markup=get_control_keyboard())
 
 # Main Scan Cycle
 while True:
