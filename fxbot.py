@@ -13,17 +13,17 @@ import numpy as np
 # --- TELEGRAM CONFIG ---
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = [
-    "1345385952",           # Admin 1 (Aap)
-    "SECOND_USER_CHAT_ID"   # Admin 2 (Optional)
+    "1345385952",           # Admin 1
+    "SECOND_USER_CHAT_ID"   # Admin 2
 ]
 
 # --- COINDCX API CREDENTIALS ---
 COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
 COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
-# --- STRICT RISK MANAGEMENT (Rs. 1,000 TOTAL POOL) ---
+# --- MICRO-CAPITAL RISK MANAGEMENT ---
 TRADE_INR_ALLOCATION = 110.0  # Safe micro order buffer
-MAX_PARALLEL_TRADES = 2       # Ek waqt me max 2 trades (~Rs. 220 total engaged)
+MAX_PARALLEL_TRADES = 2       # Max 2 active positions (~Rs. 220 total engaged)
 
 # Top 12 High-Volume & Volatile CoinDCX INR Pairs
 SYMBOLS = {
@@ -41,7 +41,6 @@ SYMBOLS = {
     "TRX/INR": {"yf": "TRX-USD", "coindcx": "TRXINR", "step": 0}
 }
 
-# Responsive High-Volatility Strategy Setup
 STRATEGIES = {
     "RAPID_VOLATILITY_SCALP": {
         "label": "⚡ [VOLATILITY SCALP - 5M/1M]",
@@ -49,7 +48,7 @@ STRATEGIES = {
         "htf_period": "1d",
         "entry_interval": "1m",
         "entry_period": "1d",
-        "adx_min": 19.0,           # Lowered for instant breakout detection
+        "adx_min": 19.0,
         "tp_multipliers": [1.5, 2.5]
     },
     "INTRADAY_MOMENTUM": {
@@ -76,11 +75,11 @@ def send_telegram(message, chat_id=None):
     recipients = [chat_id] if chat_id else [cid for cid in ADMIN_CHAT_IDS if cid != "SECOND_USER_CHAT_ID"]
     
     for cid in recipients:
-        payload = {"chat_id": cid, "text": message, "parse_mode": "Markdown"}
+        payload = {"chat_id": cid, "text": message}
         try:
             requests.post(url, json=payload, timeout=10)
         except Exception as e:
-            print(f"Telegram alert error: {e}")
+            print(f"Telegram error: {e}")
 
 def place_coindcx_order(market_pair, side, quantity):
     url = "https://api.coindcx.com/exchange/v1/orders/create"
@@ -178,13 +177,13 @@ def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
     qty = pos["qty"]
 
     if pos["side"] == "BUY":
-        # Breakeven Protection (Cost Lock)
+        # Breakeven Protection
         if curr_price >= (pos["entry"] + pos["atr"]) and pos["sl"] < pos["entry"]:
             pos["sl"] = pos["entry"]
             send_telegram(
-                f"🛡️ *BREAKEVEN LOCKED (ZERO RISK)*\n"
-                f"🏷️ `{strat_label}` | `{name}`\n"
-                f"💵 Stop Loss adjusted to Entry: `{pos['entry']:.4f}`"
+                f"🛡️ BREAKEVEN LOCKED (ZERO RISK)\n"
+                f"Strategy: {strat_label} | Pair: {name}\n"
+                f"Stop Loss set to Entry: {pos['entry']:.4f}"
             )
 
         if curr_price > pos["best_price"]:
@@ -193,24 +192,24 @@ def manage_trailing_sl(strat_key, strat_label, name, sym_cfg, curr_price):
             if new_sl > pos["sl"]:
                 pos["sl"] = new_sl
                 send_telegram(
-                    f"📈 *TRAILING SL RAISED*\n"
-                    f"🏷️ `{strat_label}` | `{name}`\n"
-                    f"🛑 New SL: `{pos['sl']:.4f}`"
+                    f"📈 TRAILING SL RAISED\n"
+                    f"Strategy: {strat_label} | Pair: {name}\n"
+                    f"New SL Level: {pos['sl']:.4f}"
                 )
         elif curr_price <= pos["sl"]:
             success, resp = place_coindcx_order(coindcx_pair, "sell", qty)
             if success:
                 send_telegram(
-                    f"🛑 *COINDCX ORDER EXITED*\n\n"
-                    f"🏷️ Strategy: `{strat_label}`\n"
-                    f"🪙 Pair: `{coindcx_pair}`\n"
-                    f"💵 Exit Price: `{curr_price:.4f}`\n"
-                    f"📦 Sold Units: `{qty}`\n"
-                    f"✅ CoinDCX Status: `Filled`"
+                    f"🛑 COINDCX ORDER EXITED\n\n"
+                    f"Strategy: {strat_label}\n"
+                    f"Pair: {coindcx_pair}\n"
+                    f"Exit Price: {curr_price:.4f}\n"
+                    f"Units: {qty}\n"
+                    f"Status: Executed"
                 )
                 pos["side"] = None
             else:
-                send_telegram(f"⚠️ *Exit Order Failed on CoinDCX:* `{resp}`")
+                send_telegram(f"⚠️ Exit Order Failed on CoinDCX: {resp}")
 
 def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
     try:
@@ -263,7 +262,6 @@ def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
         active_pos = active_positions[strat_key][name]["side"]
         tp_mults = cfg["tp_multipliers"]
 
-        # FAST EXECUTION SETUP
         if (active_pos is None) and trend_strong and ema_aligned and breakout_confirmed:
             atr_sl = curr_price - (curr_atr * 1.5)
             sl = max(swing_l, atr_sl)
@@ -280,15 +278,15 @@ def check_strategy_for_symbol(strat_key, cfg, name, sym_cfg):
                         "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
                     }
                     msg = (
-                        f"🚀 *HIGH-VOLATILITY BUY EXECUTED*\n\n"
-                        f"🏷️ Strategy: `{cfg['label']}`\n"
-                        f"🪙 Pair: `{coindcx_pair}`\n"
-                        f"💵 Approx INR Entry: `₹{inr_price:.4f}`\n"
-                        f"📦 Quantity: `{qty}` (~₹{TRADE_INR_ALLOCATION:.0f})\n"
-                        f"🛑 Initial SL: `{sl:.4f}`\n"
-                        f"🎯 TP 1: `{curr_price + (risk * tp_mults[0]):.4f}`\n"
-                        f"🎯 TP 2: `{curr_price + (risk * tp_mults[1]):.4f}`\n\n"
-                        f"⚡ *Status:* Breakeven Lock + Trailing SL Active"
+                        f"🚀 HIGH-VOLATILITY BUY EXECUTED\n\n"
+                        f"Strategy: {cfg['label']}\n"
+                        f"Pair: {coindcx_pair}\n"
+                        f"Price: {curr_price:.4f}\n"
+                        f"Units: {qty} (~₹{TRADE_INR_ALLOCATION:.0f})\n"
+                        f"SL: {sl:.4f}\n"
+                        f"TP 1: {curr_price + (risk * tp_mults[0]):.4f}\n"
+                        f"TP 2: {curr_price + (risk * tp_mults[1]):.4f}\n\n"
+                        f"Status: Trailing SL & Breakeven Active"
                     )
                     send_telegram(msg)
                 else:
@@ -313,7 +311,6 @@ def handle_incoming_users():
                         user_name = update["message"]["from"].get("first_name", "Trader")
 
                         if sender_id in ADMIN_CHAT_IDS:
-                            # Check active positions & calculate live PnL
                             pos_summary = ""
                             has_active = False
                             for s_key, pairs in active_positions.items():
@@ -323,27 +320,44 @@ def handle_incoming_users():
                                         pnl_pts = pos["best_price"] - pos["entry"]
                                         pnl_pct = (pnl_pts / pos["entry"]) * 100 if pos["entry"] > 0 else 0.0
                                         pos_summary += (
-                                            f"\n🪙 *{p_name}* ({pos['qty']} units)\n"
-                                            f"💵 Entry: `{pos['entry']:.4f}` | Cur/High: `{pos['best_price']:.4f}`\n"
-                                            f"🛑 SL: `{pos['sl']:.4f}`\n"
-                                            f"📈 Trailing PnL: `{pnl_pct:+.2f}%`\n"
+                                            f"\n🪙 {p_name} ({pos['qty']} units)\n"
+                                            f"💵 Entry: {pos['entry']:.4f} | Cur: {pos['best_price']:.4f}\n"
+                                            f"🛑 SL: {pos['sl']:.4f}\n"
+                                            f"📈 Trailing PnL: {pnl_pct:+.2f}%\n"
                                         )
 
                             if not has_active:
-                                pos_summary = "\n💤 *No active trades open right now.*"
+                                pos_summary = "\n💤 No active trades open right now."
 
-                            send_telegram(
-                                f"👑 *CoinDCX Engine Status ({user_name})*\n"
-                                f"💰 Per Trade: `₹{TRADE_INR_ALLOCATION:.0f} INR`\n"
-                                f"🛡️ Max Concurrent: `2 Positions`\n"
+                            msg_text = (
+                                f"👑 CoinDCX Engine Status ({user_name})\n"
+                                f"💰 Per Trade: ₹{TRADE_INR_ALLOCATION:.0f} INR\n"
+                                f"🛡️ Max Concurrent: 2 Positions\n"
                                 f"━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *CURRENT POSITION & PNL:*{pos_summary}\n"
+                                f"📊 CURRENT POSITION & PNL:\n{pos_summary}\n"
                                 f"━━━━━━━━━━━━━━━━━━━\n"
-                                f"🟢 Engine: `Live & Monitoring`",
-                                chat_id=sender_id
+                                f"🟢 Engine: Live & Monitoring"
                             )
+                            send_telegram(msg_text, chat_id=sender_id)
                         else:
                             send_telegram(f"Hello {user_name}! 🔒 Private bot.", chat_id=sender_id)
         except Exception as e:
             print(f"Listener error: {e}")
         time.sleep(2)
+
+threading.Thread(target=handle_incoming_users, daemon=True).start()
+
+print("CoinDCX High-Volatility Engine Live...")
+send_telegram(
+    "🔥 CoinDCX Engine Online!\n\n"
+    f"Allocation: ₹{TRADE_INR_ALLOCATION:.0f} per trade\n"
+    "Max 2 parallel positions active.\n"
+    "Send 'Status' anytime to see live PnL."
+)
+
+while True:
+    for name, sym_cfg in SYMBOLS.items():
+        for strat_key, cfg in STRATEGIES.items():
+            check_strategy_for_symbol(strat_key, cfg, name, sym_cfg)
+            time.sleep(1)
+    time.sleep(3)
