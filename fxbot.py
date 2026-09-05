@@ -21,16 +21,19 @@ ADMIN_CHAT_IDS = [
 COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
 COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
 
-# --- STRICT RISK MANAGEMENT (₹1,000 CAPITAL GUARD) ---
+# --- STRICT RISK MANAGEMENT (Rs. 1,000 CAPITAL GUARD) ---
 TRADE_INR_ALLOCATION = 110.0  # ₹110 per trade
 MAX_PARALLEL_TRADES = 2       # Maximum 2 concurrent trades (~₹220 engaged)
-DAILY_MAX_LOSS = 30.0         # ₹30 loss par din bhar ke liye trading band
+DAILY_MAX_LOSS = 30.0         # ₹30 loss par auto kill-switch
+COOL_OFF_MINUTES = 20         # SL hit hone ke baad same coin par 20 min cool-off
+MAX_SPREAD_TOLERANCE_PCT = 0.40 # 0.4% se zyada bid/ask spread par entry cancel
 
 STATE_FILE = "trades_state.json"
 is_paused = False
 daily_realized_pnl = 0.0
+cool_off_tracker = {}  # {symbol_name: cooldown_timestamp}
 
-# 12 High-Liquidity Active Pairs (Binance Global Pair + CoinDCX Local Pair)
+# 12 High-Liquidity Active Pairs
 SYMBOLS = {
     "SOL/INR": {"binance": "SOLUSDT", "pair": "B-SOL_INR", "coindcx": "SOLINR", "step": 3},
     "XRP/INR": {"binance": "XRPUSDT", "pair": "B-XRP_INR", "coindcx": "XRPINR", "step": 1},
@@ -65,7 +68,7 @@ def save_state(state):
 
 active_positions = load_state()
 
-# --- TELEGRAM INTERACTIVE CONTROLS ---
+# --- TELEGRAM CONTROLS ---
 def get_control_keyboard():
     keyboard = [
         [
@@ -158,7 +161,46 @@ def emergency_close_all():
     save_state(active_positions)
     return closed_count
 
-# --- 10X UPGRADE: BINANCE EARLY-SIGNAL LEAD ENGINE ---
+# --- UPGRADE 1: BTC REGIME & MARKET HEALTH CHECK ---
+def is_btc_healthy():
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=30"
+        resp = requests.get(url, timeout=4).json()
+        if not isinstance(resp, list) or len(resp) < 20:
+            return True  # Fallback to neutral on API hitch
+
+        closes = [float(c[4]) for c in resp]
+        series = pd.Series(closes)
+        ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
+        last_price = closes[-1]
+        
+        # Dump Protection: BTC should be above EMA20 and not down > 1% in last 15m
+        open_last = float(resp[-1][1])
+        drop_pct = ((last_price - open_last) / open_last) * 100
+        if drop_pct < -0.85 or last_price < ema20:
+            return False
+        return True
+    except Exception:
+        return True
+
+# --- UPGRADE 2: COINDCX SPREAD & SLIPPAGE GUARD ---
+def check_market_spread(pair_name):
+    try:
+        url = f"https://public.coindcx.com/market_data/orderbook?pair={pair_name}"
+        r = requests.get(url, timeout=4).json()
+        bids = r.get("bids", {})
+        asks = r.get("asks", {})
+        if bids and asks:
+            best_bid = max(float(p) for p in bids.keys())
+            best_ask = min(float(p) for p in asks.keys())
+            if best_bid > 0:
+                spread_pct = ((best_ask - best_bid) / best_bid) * 100
+                return spread_pct <= MAX_SPREAD_TOLERANCE_PCT
+    except Exception:
+        pass
+    return True
+
+# --- BINANCE LEAD SIGNAL SCANNER ---
 def check_binance_lead_signal(symbol_binance):
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
@@ -172,9 +214,7 @@ def check_binance_lead_signal(symbol_binance):
         last_c = df_b.iloc[-1]
         prev_vol_avg = df_b['volume'].iloc[-6:-1].mean()
 
-        # Rule 1: Solid green candle on Binance
         price_gain_pct = ((last_c['close'] - last_c['open']) / last_c['open']) * 100
-        # Rule 2: Volume surge at least 1.8x over last 5 minutes average
         vol_surge = last_c['volume'] > (prev_vol_avg * 1.8)
 
         if price_gain_pct >= 0.25 and vol_surge:
@@ -183,7 +223,7 @@ def check_binance_lead_signal(symbol_binance):
         pass
     return False, 0.0
 
-# --- COINDCX LOCAL CANDLES & TECHNICAL INDICATORS ---
+# --- COINDCX CANDLES & TECHNICAL INDICATORS ---
 def fetch_coindcx_candles(pair_name, interval="1m", limit=35):
     try:
         url = f"https://public.coindcx.com/market_data/candles?pair={pair_name}&interval={interval}&limit={limit}"
@@ -233,7 +273,7 @@ def generate_status_text(user_name="Trader"):
 
     active_count = sum(1 for p in active_positions.values() if p["side"] is not None)
     return (
-        f"👑 CoinDCX 10x Lead-Lag Deck ({user_name})\n"
+        f"👑 CoinDCX Pro Shield Deck ({user_name})\n"
         f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ACTIVE'}\n"
         f"Open Trades: {active_count}/{MAX_PARALLEL_TRADES}\n"
         f"Daily Realized PnL: ₹{daily_realized_pnl:.2f}\n"
@@ -245,7 +285,7 @@ def generate_status_text(user_name="Trader"):
 
 # --- TRADE EXECUTION & TRAILING ENGINE ---
 def manage_trailing_sl(name, sym_cfg, curr_price):
-    global daily_realized_pnl
+    global daily_realized_pnl, cool_off_tracker
     pos = active_positions[name]
     if pos["side"] is None:
         return
@@ -272,22 +312,34 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
         if success:
             trade_pnl = (curr_price - pos["entry"]) * qty
             daily_realized_pnl += trade_pnl
+            
+            # UPGRADE 3: Anti-Whipsaw Cool-off Activation
+            cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
+
             send_telegram(
                 f"🛑 AUTO-EXIT (SL/Trailing Hit)\n\n"
                 f"Pair: {coindcx_pair}\n"
                 f"Exit Price: ₹{curr_price:.4f}\n"
                 f"Units: {qty}\n"
                 f"Realized PnL: ₹{trade_pnl:.2f}\n"
-                f"Capital auto-credited to CoinDCX Wallet.",
+                f"Cool-off Active: {COOL_OFF_MINUTES} mins for this pair.",
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
             save_state(active_positions)
 
 def scan_symbol(name, sym_cfg):
-    global is_paused
+    global is_paused, cool_off_tracker
     active_count = sum(1 for p in active_positions.values() if p["side"] is not None)
     if is_paused or active_count >= MAX_PARALLEL_TRADES or daily_realized_pnl <= -DAILY_MAX_LOSS:
+        return
+
+    # Check Cool-off
+    if name in cool_off_tracker and time.time() < cool_off_tracker[name]:
+        return
+
+    # Check BTC Health
+    if not is_btc_healthy():
         return
 
     pair_code = sym_cfg["pair"]
@@ -295,10 +347,12 @@ def scan_symbol(name, sym_cfg):
     binance_symbol = sym_cfg["binance"]
     precision = sym_cfg["step"]
 
-    # Step 1: Binance Early Surge Verification
+    # Check Spread & Slippage
+    if not check_market_spread(pair_code):
+        return
+
     binance_surging, surge_gain = check_binance_lead_signal(binance_symbol)
 
-    # Step 2: CoinDCX Local Candlestick Inspection
     df = fetch_coindcx_candles(pair_code, interval="1m", limit=35)
     if df is None or len(df) < 25:
         return
@@ -317,7 +371,6 @@ def scan_symbol(name, sym_cfg):
     ema_bullish = float(df['ema20'].iloc[-1]) > float(df['ema50'].iloc[-1])
     local_breakout = (curr_price > float(df['swing_high'].iloc[-1])) and (curr_price > curr_open)
 
-    # Trigger Entry: Confluence of Binance Global Spike + CoinDCX Setup
     should_enter = (
         active_positions[name]["side"] is None
         and binance_surging
@@ -339,7 +392,7 @@ def scan_symbol(name, sym_cfg):
                 }
                 save_state(active_positions)
                 send_telegram(
-                    f"⚡ 10X EARLY ENTRY EXECUTED (Binance Lead)\n\n"
+                    f"⚡ INSTITUTIONAL ENTRY EXECUTED\n\n"
                     f"Pair: {coindcx_pair}\n"
                     f"Binance Surge: +{surge_gain:.2f}%\n"
                     f"Local Price: ₹{curr_price:.4f}\n"
@@ -350,16 +403,17 @@ def scan_symbol(name, sym_cfg):
 
 # --- BACKGROUND AUTOMATION THREADS ---
 def midnight_reset_scheduler():
-    global daily_realized_pnl
+    global daily_realized_pnl, cool_off_tracker
     ist = timezone(timedelta(hours=5, minutes=30))
     while True:
         now = datetime.now(ist)
         next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
         time.sleep((next_run - now).total_seconds())
 
-        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL Today: ₹{daily_realized_pnl:.2f}\nDaily risk drawdown counter reset to ₹0.00."
+        report = f"🌙 MIDNIGHT REPORT (IST)\nTotal Realized PnL: ₹{daily_realized_pnl:.2f}\nDaily risk drawdown counter reset to ₹0.00."
         send_telegram(report)
         daily_realized_pnl = 0.0
+        cool_off_tracker.clear()
 
 def handle_incoming_users():
     global is_paused
@@ -394,7 +448,7 @@ def handle_incoming_users():
                             elif cb_data == "cmd_resume":
                                 is_paused = False
                                 answer_callback_query(cb["id"], "Resumed")
-                                send_telegram("▶️ Bot Active. Scanning high-volatility pairs.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                send_telegram("▶️ Bot Active. Scanning pairs.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_close_all":
                                 answer_callback_query(cb["id"], "Exiting All")
                                 count = emergency_close_all()
@@ -412,7 +466,7 @@ def handle_incoming_users():
                                             f"✅ MANUAL SELL EXECUTED\n\n"
                                             f"🪙 Pair: {target_pair}\n"
                                             f"📦 Units Sold: {pos['qty']}\n"
-                                            f"💵 Amount: ₹{recvd_inr:.2f} credited to CoinDCX INR Wallet.",
+                                            f"💵 Est. Return: ₹{recvd_inr:.2f} credited to CoinDCX INR Wallet.",
                                             chat_id=sender_id,
                                             reply_markup=get_control_keyboard()
                                         )
@@ -436,8 +490,8 @@ def handle_incoming_users():
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
 
-print("Master CoinDCX 10x Lead-Lag Engine Online...")
-send_telegram("🔥 CoinDCX 10x Lead-Lag Engine Armed!\nBinance Global Early Signal + Instant Touch Buttons Active.", reply_markup=get_control_keyboard())
+print("Master CoinDCX Institutional Engine Online...")
+send_telegram("🔥 CoinDCX Pro Shield Armed!\nBTC Regime + Cool-off + Spread Filters Active.", reply_markup=get_control_keyboard())
 
 # Main Scan Cycle
 while True:
