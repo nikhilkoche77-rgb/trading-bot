@@ -2,4 +2,3 @@ yfinance
 pandas
 requests
 numpy
-g4f
