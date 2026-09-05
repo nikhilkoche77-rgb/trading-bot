@@ -9,7 +9,10 @@ import numpy as np
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 MY_CHAT_ID = "1345385952"
 
-# Multi-Timeframe Strategy Configurations
+# --- FREE PAPER TRADING ACCOUNT (VIRTUAL FUNDS) ---
+virtual_balance = 10000.0  # $10,000 Fake Demo Balance
+TRADE_RISK_PERCENT = 2.0   # Har trade me 2% risk
+
 STRATEGIES = {
     "SCALP": {
         "label": "⚡ [SCALP - 15M/5M/1M]",
@@ -46,7 +49,6 @@ STRATEGIES = {
     }
 }
 
-# 24/7 Active Pairs
 SYMBOLS = {
     "BTC/USD": "BTC-USD",
     "ETH/USD": "ETH-USD",
@@ -57,9 +59,10 @@ SYMBOLS = {
     "DOGE/USD": "DOGE-USD"
 }
 
+# Track virtual positions
 active_positions = {
     strat_key: {
-        name: {"side": None, "entry": 0.0, "sl": 0.0, "best_price": 0.0, "atr": 0.0}
+        name: {"side": None, "entry": 0.0, "sl": 0.0, "best_price": 0.0, "atr": 0.0, "qty": 0.0}
         for name in SYMBOLS
     }
     for strat_key in STRATEGIES
@@ -74,6 +77,7 @@ def send_telegram(message, chat_id=MY_CHAT_ID):
         print(f"Telegram error: {e}")
 
 def handle_incoming_users():
+    global virtual_balance
     last_update_id = 0
     while True:
         try:
@@ -91,18 +95,17 @@ def handle_incoming_users():
                         if sender_id == MY_CHAT_ID:
                             send_telegram(
                                 f"👑 *Admin Dashboard ({user_name})*\n\n"
-                                f"🤖 Engine Status: `Online 24/7`\n"
-                                f"🎯 Scalp: `15m/5m/1m`\n"
-                                f"⏱️ Intraday: `1d/4h/1h -> 5m/15m`\n"
-                                f"🌊 Swing: `1w/1d -> 1h`\n"
-                                f"📊 Monitored Assets: `{len(SYMBOLS)} Cryptos`",
+                                f"🤖 Mode: `100% Free Paper Trading`\n"
+                                f"💰 Virtual Balance: `${virtual_balance:,.2f} USDT`\n"
+                                f"🎯 Status: `Auto Entry/Exit Active`\n"
+                                f"📊 Assets: `{len(SYMBOLS)} Cryptos Monitored`",
                                 chat_id=sender_id
                             )
                         else:
                             public_notice = (
                                 f"Hello {user_name}! 👋\n\n"
-                                f"⚠️ *Private Algorithmic Engine*\n"
-                                f"Signals are restricted to authorized administrators.\n\n"
+                                f"⚠️ *Private Auto-Execution Engine*\n"
+                                f"Access is restricted to authorized accounts.\n\n"
                                 f"🔒 *Access:* Closed"
                             )
                             send_telegram(public_notice, chat_id=sender_id)
@@ -158,6 +161,7 @@ def get_trend(ticker_symbol, period, interval):
         return "NEUTRAL"
 
 def manage_trailing_sl(strat_key, strat_label, name, curr_price):
+    global virtual_balance
     pos = active_positions[strat_key][name]
     if pos["side"] is None:
         return
@@ -178,12 +182,17 @@ def manage_trailing_sl(strat_key, strat_label, name, curr_price):
                     f"🛑 New SL: `{pos['sl']:.4f}`"
                 )
         elif curr_price <= pos["sl"]:
+            # Auto Virtual Exit
+            pnl = (curr_price - pos["entry"]) * pos["qty"]
+            virtual_balance += pnl
+            pnl_text = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
             send_telegram(
-                f"🔴 *EXIT HIT (STOP LOSS)*\n"
+                f"🔴 *AUTO EXIT HIT (CLOSED)*\n\n"
                 f"🏷️ Strategy: `{strat_label}`\n"
                 f"🪙 Asset: `{name}`\n"
-                f"💵 Exit: `{curr_price:.4f}`\n"
-                f"🛑 SL Level: `{pos['sl']:.4f}`"
+                f"💵 Exit Price: `{curr_price:.4f}`\n"
+                f"📊 PnL: `{pnl_text}`\n"
+                f"💰 Balance: `${virtual_balance:,.2f} USDT`"
             )
             pos["side"] = None
 
@@ -201,21 +210,25 @@ def manage_trailing_sl(strat_key, strat_label, name, curr_price):
                     f"🛑 New SL: `{pos['sl']:.4f}`"
                 )
         elif curr_price >= pos["sl"]:
+            pnl = (pos["entry"] - curr_price) * pos["qty"]
+            virtual_balance += pnl
+            pnl_text = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
             send_telegram(
-                f"🔴 *EXIT HIT (STOP LOSS)*\n"
+                f"🔴 *AUTO EXIT HIT (CLOSED)*\n\n"
                 f"🏷️ Strategy: `{strat_label}`\n"
                 f"🪙 Asset: `{name}`\n"
-                f"💵 Exit: `{curr_price:.4f}`\n"
-                f"🛑 SL Level: `{pos['sl']:.4f}`"
+                f"💵 Exit Price: `{curr_price:.4f}`\n"
+                f"📊 PnL: `{pnl_text}`\n"
+                f"💰 Balance: `${virtual_balance:,.2f} USDT`"
             )
             pos["side"] = None
 
 def check_strategy_for_symbol(strat_key, cfg, name, ticker_symbol):
+    global virtual_balance
     try:
         htf_trend = get_trend(ticker_symbol, cfg["htf_period"], cfg["htf_interval"])
         mtf_trend = get_trend(ticker_symbol, cfg["mtf_period"], cfg["mtf_interval"])
 
-        # Both Higher and Intermediate timeframes must align
         if htf_trend != mtf_trend or htf_trend == "NEUTRAL":
             return
 
@@ -254,55 +267,55 @@ def check_strategy_for_symbol(strat_key, cfg, name, ticker_symbol):
         active_pos = active_positions[strat_key][name]["side"]
         tp_mults = cfg["tp_multipliers"]
 
-        # BUY SETUP
+        # BUY SETUP -> AUTO VIRTUAL ENTRY
         if (active_pos is None) and (htf_trend == "BULLISH") and strong_trend and (curr_ema50 > curr_ema93) and (curr_price > swing_h) and (curr_price > curr_open):
             atr_sl = curr_price - (curr_atr * 1.5)
             sl = max(swing_l, atr_sl)
             risk = curr_price - sl
 
             if risk > 0:
+                risk_amount = virtual_balance * (TRADE_RISK_PERCENT / 100)
+                qty = risk_amount / risk
+
                 active_positions[strat_key][name] = {
-                    "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr
+                    "side": "BUY", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
                 }
                 msg = (
-                    f"🚀 *{cfg['label']} BUY SIGNAL*\n\n"
-                    f"🪙 *Asset:* `{name}`\n"
-                    f"📈 *Trend Confluence:* `{cfg['htf_interval']} + {cfg['mtf_interval']} Bullish`\n"
-                    f"💵 *Entry:* `{curr_price:.4f}`\n"
-                    f"🛑 *Dynamic SL:* `{sl:.4f}`\n"
-                    f"📊 *ATR:* `{curr_atr:.4f}`\n\n"
-                    f"🎯 *TARGETS:*\n"
-                    f"• TP 1: `{curr_price + (risk * tp_mults[0]):.4f}`\n"
-                    f"• TP 2: `{curr_price + (risk * tp_mults[1]):.4f}`\n"
-                    f"• TP 3: `{curr_price + (risk * tp_mults[2]):.4f}`\n"
-                    f"• TP 4: `{curr_price + (risk * tp_mults[3]):.4f}`\n\n"
-                    f"⚡ *ADX:* `{curr_adx:.1f}`"
+                    f"🟢 *AUTO TRADE OPENED (BUY)*\n\n"
+                    f"🏷️ Strategy: `{cfg['label']}`\n"
+                    f"🪙 Asset: `{name}`\n"
+                    f"💵 Entry: `{curr_price:.4f}`\n"
+                    f"📦 Units: `{qty:.4f}`\n"
+                    f"🛑 Stop Loss: `{sl:.4f}`\n"
+                    f"🎯 TP 1: `{curr_price + (risk * tp_mults[0]):.4f}`\n"
+                    f"🎯 TP 2: `{curr_price + (risk * tp_mults[1]):.4f}`\n\n"
+                    f"🛡️ *Trailing SL:* `Active`"
                 )
                 send_telegram(msg)
 
-        # SELL SETUP
+        # SELL SETUP -> AUTO VIRTUAL ENTRY
         elif (active_pos is None) and (htf_trend == "BEARISH") and strong_trend and (curr_ema50 < curr_ema93) and (curr_price < swing_l) and (curr_price < curr_open):
             atr_sl = curr_price + (curr_atr * 1.5)
             sl = min(swing_h, atr_sl)
             risk = sl - curr_price
 
             if risk > 0:
+                risk_amount = virtual_balance * (TRADE_RISK_PERCENT / 100)
+                qty = risk_amount / risk
+
                 active_positions[strat_key][name] = {
-                    "side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr
+                    "side": "SELL", "entry": curr_price, "sl": sl, "best_price": curr_price, "atr": curr_atr, "qty": qty
                 }
                 msg = (
-                    f"⚠️ *{cfg['label']} SELL SIGNAL*\n\n"
-                    f"🪙 *Asset:* `{name}`\n"
-                    f"📉 *Trend Confluence:* `{cfg['htf_interval']} + {cfg['mtf_interval']} Bearish`\n"
-                    f"💵 *Entry:* `{curr_price:.4f}`\n"
-                    f"🛑 *Dynamic SL:* `{sl:.4f}`\n"
-                    f"📊 *ATR:* `{curr_atr:.4f}`\n\n"
-                    f"🎯 *TARGETS:*\n"
-                    f"• TP 1: `{curr_price - (risk * tp_mults[0]):.4f}`\n"
-                    f"• TP 2: `{curr_price - (risk * tp_mults[1]):.4f}`\n"
-                    f"• TP 3: `{curr_price - (risk * tp_mults[2]):.4f}`\n"
-                    f"• TP 4: `{curr_price - (risk * tp_mults[3]):.4f}`\n\n"
-                    f"⚡ *ADX:* `{curr_adx:.1f}`"
+                    f"🔴 *AUTO TRADE OPENED (SELL)*\n\n"
+                    f"🏷️ Strategy: `{cfg['label']}`\n"
+                    f"🪙 Asset: `{name}`\n"
+                    f"💵 Entry: `{curr_price:.4f}`\n"
+                    f"📦 Units: `{qty:.4f}`\n"
+                    f"🛑 Stop Loss: `{sl:.4f}`\n"
+                    f"🎯 TP 1: `{curr_price - (risk * tp_mults[0]):.4f}`\n"
+                    f"🎯 TP 2: `{curr_price - (risk * tp_mults[1]):.4f}`\n\n"
+                    f"🛡️ *Trailing SL:* `Active`"
                 )
                 send_telegram(msg)
 
@@ -311,16 +324,16 @@ def check_strategy_for_symbol(strat_key, cfg, name, ticker_symbol):
 
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 
-print("Multi-Timeframe Crypto Engine Live...")
+print("Free Paper Trading Engine Online...")
 send_telegram(
-    "🔥 *Multi-Timeframe Crypto Engine Live 24/7!*\n\n"
-    "• ⚡ *Scalping:* 15M / 5M -> 1M Entry\n"
-    "• ⏱️ *Intraday:* 1D / 1H -> 5M Entry\n"
-    "• 🌊 *Swing:* 1W / 1D -> 1H Entry\n\n"
-    "Scanning BTC, ETH, SOL, BNB, XRP, ADA, DOGE..."
+    "🎉 *Free Auto-Trading Engine Active!*\n\n"
+    "💰 Starting Virtual Balance: `$10,000 USDT`\n"
+    "⚡ Auto Entries, Dynamic Trailing SL & Exit tracking enabled.\n\n"
+    "Zero financial risk. Scanning market 24/7..."
 )
 
 while True:
+    print("Scanning active pairs for entry triggers...")
     for name, ticker in SYMBOLS.items():
         for strat_key, cfg in STRATEGIES.items():
             check_strategy_for_symbol(strat_key, cfg, name, ticker)
