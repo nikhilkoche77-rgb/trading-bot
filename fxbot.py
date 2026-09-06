@@ -51,47 +51,43 @@ daily_stats = {
 # --- UNIFIED ASSET UNIVERSE WITH LOT CONTRACTS ---
 SYMBOLS = {
     # Commodities & Forex Synthetics
-    "XAU/USDT": {"base_curr": "USDT", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4, "lot_contract": 100.0},
-    "EUR/USDT": {"base_curr": "USDT", "binance": "EURUSDT", "pair": "B-EUR_USDT", "coindcx": "EURUSDT", "step": 4, "lot_contract": 100000.0},
-    "USDT/INR": {"base_curr": "INR", "binance": "USDCUSDT", "pair": "B-USDT_INR", "coindcx": "USDTINR", "step": 2, "lot_contract": 100000.0},
-    "GOLD/INR": {"base_curr": "INR", "binance": "PAXGUSDT", "pair": "B-PAXG_INR", "coindcx": "PAXGINR", "step": 4, "lot_contract": 100.0},
+    "XAU/USDT": {"base_curr": "USDT", "target_coin": "PAXG", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4, "lot_contract": 100.0},
+    "EUR/USDT": {"base_curr": "USDT", "target_coin": "EUR", "binance": "EURUSDT", "pair": "B-EUR_USDT", "coindcx": "EURUSDT", "step": 4, "lot_contract": 100000.0},
+    "USDT/INR": {"base_curr": "INR", "target_coin": "USDT", "binance": "USDCUSDT", "pair": "B-USDT_INR", "coindcx": "USDTINR", "step": 2, "lot_contract": 100000.0},
+    "GOLD/INR": {"base_curr": "INR", "target_coin": "PAXG", "binance": "PAXGUSDT", "pair": "B-PAXG_INR", "coindcx": "PAXGINR", "step": 4, "lot_contract": 100.0},
 
     # Crypto Majors & Altcoins
-    "BTC/USDT": {"base_curr": "USDT", "binance": "BTCUSDT", "pair": "B-BTC_USDT", "coindcx": "BTCUSDT", "step": 5, "lot_contract": 1.0},
-    "ETH/USDT": {"base_curr": "USDT", "binance": "ETHUSDT", "pair": "B-ETH_USDT", "coindcx": "ETHUSDT", "step": 4, "lot_contract": 1.0},
-    "SOL/USDT": {"base_curr": "USDT", "binance": "SOLUSDT", "pair": "B-SOL_USDT", "coindcx": "SOLUSDT", "step": 3, "lot_contract": 1.0},
-    "XRP/USDT": {"base_curr": "USDT", "binance": "XRPUSDT", "pair": "B-XRP_USDT", "coindcx": "XRPUSDT", "step": 1, "lot_contract": 1.0},
-    "DOGE/USDT": {"base_curr": "USDT", "binance": "DOGEUSDT", "pair": "B-DOGE_USDT", "coindcx": "DOGEUSDT", "step": 0, "lot_contract": 1.0},
-    "PEPE/USDT": {"base_curr": "USDT", "binance": "PEPEUSDT", "pair": "B-PEPE_USDT", "coindcx": "PEPEUSDT", "step": 0, "lot_contract": 1.0},
-    "SHIB/USDT": {"base_curr": "USDT", "binance": "SHIBUSDT", "pair": "B-SHIB_USDT", "coindcx": "SHIBUSDT", "step": 0, "lot_contract": 1.0},
-    "SUI/USDT": {"base_curr": "USDT", "binance": "SUIUSDT", "pair": "B-SUI_USDT", "coindcx": "SUIUSDT", "step": 1, "lot_contract": 1.0},
-    "NEAR/USDT": {"base_curr": "USDT", "binance": "NEARUSDT", "pair": "B-NEAR_USDT", "coindcx": "NEARUSDT", "step": 2, "lot_contract": 1.0},
-    "AVAX/USDT": {"base_curr": "USDT", "binance": "AVAXUSDT", "pair": "B-AVAX_USDT", "coindcx": "AVAXUSDT", "step": 2, "lot_contract": 1.0},
-    "WIF/USDT": {"base_curr": "USDT", "binance": "WIFUSDT", "pair": "B-WIF_USDT", "coindcx": "WIFUSDT", "step": 2, "lot_contract": 1.0},
-    "LINK/USDT": {"base_curr": "USDT", "binance": "LINKUSDT", "pair": "B-LINK_USDT", "coindcx": "LINKUSDT", "step": 2, "lot_contract": 1.0},
-    "FTM/USDT": {"base_curr": "USDT", "binance": "FTMUSDT", "pair": "B-FTM_USDT", "coindcx": "FTMUSDT", "step": 1, "lot_contract": 1.0},
+    "BTC/USDT": {"base_curr": "USDT", "target_coin": "BTC", "binance": "BTCUSDT", "pair": "B-BTC_USDT", "coindcx": "BTCUSDT", "step": 5, "lot_contract": 1.0},
+    "ETH/USDT": {"base_curr": "USDT", "target_coin": "ETH", "binance": "ETHUSDT", "pair": "B-ETH_USDT", "coindcx": "ETHUSDT", "step": 4, "lot_contract": 1.0},
+    "SOL/USDT": {"base_curr": "USDT", "target_coin": "SOL", "binance": "SOLUSDT", "pair": "B-SOL_USDT", "coindcx": "SOLUSDT", "step": 3, "lot_contract": 1.0},
+    "XRP/USDT": {"base_curr": "USDT", "target_coin": "XRP", "binance": "XRPUSDT", "pair": "B-XRP_USDT", "coindcx": "XRPUSDT", "step": 1, "lot_contract": 1.0},
+    "DOGE/USDT": {"base_curr": "USDT", "target_coin": "DOGE", "binance": "DOGEUSDT", "pair": "B-DOGE_USDT", "coindcx": "DOGEUSDT", "step": 0, "lot_contract": 1.0},
+    "PEPE/USDT": {"base_curr": "USDT", "target_coin": "PEPE", "binance": "PEPEUSDT", "pair": "B-PEPE_USDT", "coindcx": "PEPEUSDT", "step": 0, "lot_contract": 1.0},
+    "SHIB/USDT": {"base_curr": "USDT", "target_coin": "SHIB", "binance": "SHIBUSDT", "pair": "B-SHIB_USDT", "coindcx": "SHIBUSDT", "step": 0, "lot_contract": 1.0},
+    "SUI/USDT": {"base_curr": "USDT", "target_coin": "SUI", "binance": "SUIUSDT", "pair": "B-SUI_USDT", "coindcx": "SUIUSDT", "step": 1, "lot_contract": 1.0},
+    "NEAR/USDT": {"base_curr": "USDT", "target_coin": "NEAR", "binance": "NEARUSDT", "pair": "B-NEAR_USDT", "coindcx": "NEARUSDT", "step": 2, "lot_contract": 1.0},
+    "AVAX/USDT": {"base_curr": "USDT", "target_coin": "AVAX", "binance": "AVAXUSDT", "pair": "B-AVAX_USDT", "coindcx": "AVAXUSDT", "step": 2, "lot_contract": 1.0},
+    "WIF/USDT": {"base_curr": "USDT", "target_coin": "WIF", "binance": "WIFUSDT", "pair": "B-WIF_USDT", "coindcx": "WIFUSDT", "step": 2, "lot_contract": 1.0},
+    "LINK/USDT": {"base_curr": "USDT", "target_coin": "LINK", "binance": "LINKUSDT", "pair": "B-LINK_USDT", "coindcx": "LINKUSDT", "step": 2, "lot_contract": 1.0},
+    "FTM/USDT": {"base_curr": "USDT", "target_coin": "FTM", "binance": "FTMUSDT", "pair": "B-FTM_USDT", "coindcx": "FTMUSDT", "step": 1, "lot_contract": 1.0},
 
     # Direct INR Pairs
-    "BTC/INR": {"base_curr": "INR", "binance": "BTCUSDT", "pair": "B-BTC_INR", "coindcx": "BTCINR", "step": 5, "lot_contract": 1.0},
-    "ETH/INR": {"base_curr": "INR", "binance": "ETHUSDT", "pair": "B-ETH_INR", "coindcx": "ETHINR", "step": 4, "lot_contract": 1.0},
-    "SOL/INR": {"base_curr": "INR", "binance": "SOLUSDT", "pair": "B-SOL_INR", "coindcx": "SOLINR", "step": 3, "lot_contract": 1.0},
-    "XRP/INR": {"base_curr": "INR", "binance": "XRPUSDT", "pair": "B-XRP_INR", "coindcx": "XRPINR", "step": 1, "lot_contract": 1.0},
-    "DOGE/INR": {"base_curr": "INR", "binance": "DOGEUSDT", "pair": "B-DOGE_INR", "coindcx": "DOGEINR", "step": 0, "lot_contract": 1.0},
-    "ADA/INR": {"base_curr": "INR", "binance": "ADAUSDT", "pair": "B-ADA_INR", "coindcx": "ADAINR", "step": 1, "lot_contract": 1.0},
-    "PEPE/INR": {"base_curr": "INR", "binance": "PEPEUSDT", "pair": "B-PEPE_INR", "coindcx": "PEPEINR", "step": 0, "lot_contract": 1.0},
-    "BONK/INR": {"base_curr": "INR", "binance": "BONKUSDT", "pair": "B-BONK_INR", "coindcx": "BONKINR", "step": 0, "lot_contract": 1.0},
-    "RENDER/INR": {"base_curr": "INR", "binance": "RENDERUSDT", "pair": "B-RENDER_INR", "coindcx": "RENDERINR", "step": 2, "lot_contract": 1.0}
+    "BTC/INR": {"base_curr": "INR", "target_coin": "BTC", "binance": "BTCUSDT", "pair": "B-BTC_INR", "coindcx": "BTCINR", "step": 5, "lot_contract": 1.0},
+    "ETH/INR": {"base_curr": "INR", "target_coin": "ETH", "binance": "ETHUSDT", "pair": "B-ETH_INR", "coindcx": "ETHINR", "step": 4, "lot_contract": 1.0},
+    "SOL/INR": {"base_curr": "INR", "target_coin": "SOL", "binance": "SOLUSDT", "pair": "B-SOL_INR", "coindcx": "SOLINR", "step": 3, "lot_contract": 1.0},
+    "XRP/INR": {"base_curr": "INR", "target_coin": "XRP", "binance": "XRPUSDT", "pair": "B-XRP_INR", "coindcx": "XRPINR", "step": 1, "lot_contract": 1.0},
+    "DOGE/INR": {"base_curr": "INR", "target_coin": "DOGE", "binance": "DOGEUSDT", "pair": "B-DOGE_INR", "coindcx": "DOGEINR", "step": 0, "lot_contract": 1.0},
+    "ADA/INR": {"base_curr": "INR", "target_coin": "ADA", "binance": "ADAUSDT", "pair": "B-ADA_INR", "coindcx": "ADAINR", "step": 1, "lot_contract": 1.0},
+    "PEPE/INR": {"base_curr": "INR", "target_coin": "PEPE", "binance": "PEPEUSDT", "pair": "B-PEPE_INR", "coindcx": "PEPEINR", "step": 0, "lot_contract": 1.0},
+    "BONK/INR": {"base_curr": "INR", "target_coin": "BONK", "binance": "BONKUSDT", "pair": "B-BONK_INR", "coindcx": "BONKINR", "step": 0, "lot_contract": 1.0},
+    "RENDER/INR": {"base_curr": "INR", "target_coin": "RENDER", "binance": "RENDERUSDT", "pair": "B-RENDER_INR", "coindcx": "RENDERINR", "step": 2, "lot_contract": 1.0}
 }
 
 def calculate_lot_size(qty, lot_contract):
     lot = qty / lot_contract
     return round(lot, 5) if lot < 0.01 else round(lot, 3)
 
-# --- SIP WEIGHT SIZING ENGINE ---
 def calculate_sip_weight_allocation(base_curr, inr_bal, usdt_bal):
-    """
-    Calculates dynamic trade amount based on active balance and weight factor.
-    """
     bal = inr_bal if base_curr == "INR" else usdt_bal
     raw_amount = bal * WEIGHT_ALLOCATION_PCT
     min_limit = MIN_TRADE_INR if base_curr == "INR" else MIN_TRADE_USDT
@@ -117,58 +113,6 @@ def save_state(state):
 
 active_positions = load_state()
 
-# --- TELEGRAM CONTROLS ---
-def get_control_keyboard():
-    keyboard = [
-        [
-            {"text": "📊 Live Terminal", "callback_data": "cmd_status"},
-            {"text": "💰 Wallets", "callback_data": "cmd_balance"}
-        ],
-        [
-            {"text": f"⚖️ SIP Weight ({int(WEIGHT_ALLOCATION_PCT*100)}%)", "callback_data": "cmd_toggle_weight"},
-            {"text": f"🎯 Target (1:{TARGET_RR_RATIO})", "callback_data": "cmd_toggle_rr"}
-        ],
-        [
-            {"text": "📋 SIP Weight Breakdown", "callback_data": "cmd_weight_calc"}
-        ]
-    ]
-
-    active_sells = []
-    for p_name, pos in active_positions.items():
-        if pos.get("side") is not None:
-            active_sells.append({"text": f"🔴 Close {p_name} ({pos.get('lot', 0.0):.4f} Lot)", "callback_data": f"sell_{p_name}"})
-
-    if active_sells:
-        keyboard.append(active_sells)
-
-    keyboard.append([
-        {"text": "📈 Performance Analytics", "callback_data": "cmd_analytics"},
-        {"text": "⏸️ Pause", "callback_data": "cmd_pause"},
-        {"text": "▶️ Resume", "callback_data": "cmd_resume"}
-    ])
-    keyboard.append([{"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_close_all"}])
-
-    return {"inline_keyboard": keyboard}
-
-def send_telegram(message, chat_id=None, reply_markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    recipients = [chat_id] if chat_id else [cid for cid in ADMIN_CHAT_IDS if cid != "SECOND_USER_CHAT_ID"]
-    for cid in recipients:
-        payload = {"chat_id": cid, "text": message}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        try:
-            requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"Telegram error: {e}")
-
-def answer_callback_query(callback_query_id, text=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
-    try:
-        requests.post(url, json={"callback_query_id": callback_query_id, "text": text}, timeout=5)
-    except Exception:
-        pass
-
 # --- COINDCX API EXECUTION ---
 def coindcx_auth_post(endpoint, body):
     timeStamp = int(round(time.time() * 1000))
@@ -186,13 +130,81 @@ def get_coindcx_balances():
     success, data = coindcx_auth_post("/exchange/v1/users/balances", {})
     inr_bal = 0.0
     usdt_bal = 0.0
+    raw_balances = {}
     if success and isinstance(data, list):
         for item in data:
-            if item.get("currency") == "INR":
-                inr_bal = float(item.get("balance", 0.0))
-            elif item.get("currency") == "USDT":
-                usdt_bal = float(item.get("balance", 0.0))
-    return inr_bal, usdt_bal
+            curr = item.get("currency", "")
+            b_val = float(item.get("balance", 0.0))
+            raw_balances[curr] = b_val
+            if curr == "INR":
+                inr_bal = b_val
+            elif curr == "USDT":
+                usdt_bal = b_val
+    return inr_bal, usdt_bal, raw_balances
+
+def get_market_price(pair_code):
+    try:
+        url = f"https://public.coindcx.com/market_data/candles?pair={pair_code}&interval=1m&limit=2"
+        r = requests.get(url, timeout=4).json()
+        if isinstance(r, list) and len(r) > 0:
+            return float(r[0]['close'])
+    except Exception:
+        pass
+    return 0.0
+
+# --- AUTO SYNC HOLDINGS FROM COINDCX (SOLVES GHOST TRADE BUG) ---
+def sync_existing_holdings_from_exchange():
+    """
+    Checks CoinDCX wallet directly on startup. If any target coin has active 
+    balance, syncs it into the bot state and resumes trailing.
+    """
+    print("Checking CoinDCX for existing open trades...")
+    _, _, raw_balances = get_coindcx_balances()
+    synced_any = False
+
+    for name, cfg in SYMBOLS.items():
+        t_coin = cfg.get("target_coin")
+        if not t_coin or t_coin in ["INR", "USDT"]:
+            continue
+
+        holding_qty = raw_balances.get(t_coin, 0.0)
+        curr_price = get_market_price(cfg["pair"])
+
+        if curr_price > 0 and (holding_qty * curr_price) >= 90.0:  # If value > ₹90 / $1
+            if active_positions[name].get("side") is None:
+                step = cfg["step"]
+                clean_qty = round(holding_qty, step) if step > 0 else math.floor(holding_qty)
+                lot_size = calculate_lot_size(clean_qty, cfg.get("lot_contract", 1.0))
+                approx_amount = round(clean_qty * curr_price, 2)
+                initial_sl = round(curr_price * 0.985, 4)  # 1.5% protective baseline SL
+
+                active_positions[name] = {
+                    "side": "BUY",
+                    "entry": curr_price,
+                    "sl": initial_sl,
+                    "tp": round(curr_price * 1.03, 4),
+                    "best_price": curr_price,
+                    "atr": curr_price * 0.01,
+                    "qty": clean_qty,
+                    "curr": cfg["base_curr"],
+                    "lot": lot_size,
+                    "amount": approx_amount
+                }
+                synced_any = True
+                print(f"Auto-Synced existing holding: {name} ({clean_qty} units)")
+                send_telegram(
+                    f"🔄 AUTO-SYNCED EXISTING COINDCX HOLDING\n\n"
+                    f"Asset: {name}\n"
+                    f"Units Found: {clean_qty}\n"
+                    f"Volume: {lot_size:.5f} Lot\n"
+                    f"Market Value: {cfg['base_curr']} {approx_amount:.2f}\n"
+                    f"Trailing SL: Activated at {initial_sl}\n\n"
+                    f"✅ Naya code deploy hone ke baad bhi trade tracking resume ho chuki hai.",
+                    reply_markup=get_control_keyboard()
+                )
+
+    if synced_any:
+        save_state(active_positions)
 
 def place_coindcx_order(market_pair, side, quantity):
     body = {
@@ -329,26 +341,71 @@ def calculate_technical_indicators(df, length=14):
     adx = dx.rolling(length).mean()
     return atr, adx
 
-# --- SIP BREAKDOWN & STATUS TEXTS ---
+# --- TELEGRAM CONTROLS & STATUS ---
+def get_control_keyboard():
+    keyboard = [
+        [
+            {"text": "📊 Live Terminal", "callback_data": "cmd_status"},
+            {"text": "💰 Wallets", "callback_data": "cmd_balance"}
+        ],
+        [
+            {"text": f"⚖️ SIP Weight ({int(WEIGHT_ALLOCATION_PCT*100)}%)", "callback_data": "cmd_toggle_weight"},
+            {"text": f"🎯 Target (1:{TARGET_RR_RATIO})", "callback_data": "cmd_toggle_rr"}
+        ],
+        [
+            {"text": "🔄 Sync CoinDCX Trades", "callback_data": "cmd_sync_now"},
+            {"text": "📋 SIP Breakdown", "callback_data": "cmd_weight_calc"}
+        ]
+    ]
+
+    active_sells = []
+    for p_name, pos in active_positions.items():
+        if pos.get("side") is not None:
+            active_sells.append({"text": f"🔴 Close {p_name} ({pos.get('lot', 0.0):.4f} Lot)", "callback_data": f"sell_{p_name}"})
+
+    if active_sells:
+        keyboard.append(active_sells)
+
+    keyboard.append([
+        {"text": "📈 Performance Analytics", "callback_data": "cmd_analytics"},
+        {"text": "⏸️ Pause", "callback_data": "cmd_pause"},
+        {"text": "▶️ Resume", "callback_data": "cmd_resume"}
+    ])
+    keyboard.append([{"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_close_all"}])
+
+    return {"inline_keyboard": keyboard}
+
+def send_telegram(message, chat_id=None, reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    recipients = [chat_id] if chat_id else [cid for cid in ADMIN_CHAT_IDS if cid != "SECOND_USER_CHAT_ID"]
+    for cid in recipients:
+        payload = {"chat_id": cid, "text": message}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Telegram error: {e}")
+
+def answer_callback_query(callback_query_id, text=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
+    try:
+        requests.post(url, json={"callback_query_id": callback_query_id, "text": text}, timeout=5)
+    except Exception:
+        pass
+
 def generate_sip_breakdown_text(inr_bal, usdt_bal):
     inr_trade = calculate_sip_weight_allocation("INR", inr_bal, usdt_bal)
     usdt_trade = calculate_sip_weight_allocation("USDT", inr_bal, usdt_bal)
-    
-    # Sample calculation for SOL and BTC
-    sol_qty_sample = inr_trade / 14000.0 if inr_trade > 0 else 0.0
     return (
         f"📋 SIP WEIGHT DYNAMIC BREAKDOWN\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"🇮🇳 INR Wallet: ₹{inr_bal:.2f}\n"
-        f"• Base Allocation Weight: {int(WEIGHT_ALLOCATION_PCT*100)}%\n"
-        f"• Current Calculated Trade Amount: ₹{inr_trade:.2f}\n"
-        f"• Estimated Execution Volume (Sample SOL): ~{sol_qty_sample:.4f} Units\n"
-        f"• Auto-Limits: Min ₹{MIN_TRADE_INR:.0f} | Max ₹{MAX_TRADE_INR:.0f}\n\n"
+        f"• Base Allocation: {int(WEIGHT_ALLOCATION_PCT*100)}%\n"
+        f"• Next Trade Amount: ₹{inr_trade:.2f}\n\n"
         f"💵 USDT Wallet: ${usdt_bal:.2f}\n"
-        f"• Current Calculated Trade Amount: ${usdt_trade:.2f}\n"
-        f"• Auto-Limits: Min ${MIN_TRADE_USDT:.2f} | Max ${MAX_TRADE_USDT:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 Balance jaise badhega ya ghatega, ye amounts aur quantities live dynamically adjust hongi."
+        f"• Next Trade Amount: ${usdt_trade:.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━"
     )
 
 def generate_status_text(user_name="Trader"):
@@ -360,11 +417,10 @@ def generate_status_text(user_name="Trader"):
             curr_sym = "$" if pos.get("curr") == "USDT" else "₹"
             pnl_pct = ((pos["best_price"] - pos["entry"]) / pos["entry"]) * 100 if pos["entry"] > 0 else 0.0
             pos_summary += (
-                f"\n📌 {p_name}\n"
-                f"• Volume (Lot): {pos.get('lot', 0.0):.5f} Lot ({pos['qty']} units)\n"
-                f"• Amount Allocated: {curr_sym}{pos.get('amount', 0.0):.2f}\n"
+                f"\n📌 {p_name} ({pos.get('lot', 0.0):.5f} Lot)\n"
+                f"• Amount: {curr_sym}{pos.get('amount', 0.0):.2f}\n"
                 f"• Entry: {curr_sym}{pos['entry']:.4f} | Cur: {curr_sym}{pos['best_price']:.4f}\n"
-                f"• SL: {curr_sym}{pos['sl']:.4f} | TP (1:{TARGET_RR_RATIO}): {curr_sym}{pos.get('tp', 0.0):.4f}\n"
+                f"• SL: {curr_sym}{pos['sl']:.4f} | TP: {curr_sym}{pos.get('tp', 0.0):.4f}\n"
                 f"• Running Trailing: {pnl_pct:+.2f}%\n"
             )
     if not has_active:
@@ -374,7 +430,6 @@ def generate_status_text(user_name="Trader"):
     return (
         f"👑 Terminal Status ({user_name})\n"
         f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ONLINE'}\n"
-        f"SIP Weight: {int(WEIGHT_ALLOCATION_PCT*100)}% Dynamic | 1:{TARGET_RR_RATIO} Target\n"
         f"Open Positions: {active_count}/{MAX_PARALLEL_TRADES}\n"
         f"Net Daily PnL: ₹{daily_realized_pnl_inr:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
@@ -386,14 +441,11 @@ def generate_analytics_text():
     total = daily_stats["total_trades"]
     win_rate = (daily_stats["wins"] / total * 100) if total > 0 else 0.0
     return (
-        f"📊 INSTITUTIONAL PERFORMANCE REPORT\n"
+        f"📊 PERFORMANCE REPORT\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔢 Total Completed Trades: {total}\n"
-        f"✅ Wins: {daily_stats['wins']} | ❌ Losses: {daily_stats['losses']}\n"
+        f"🔢 Total Trades: {total} | Wins: {daily_stats['wins']} | Losses: {daily_stats['losses']}\n"
         f"🎯 Win Rate: {win_rate:.1f}%\n"
         f"💰 Realized Net PnL: ₹{daily_realized_pnl_inr:.2f}\n"
-        f"🌟 Best Winner: ₹{daily_stats['best_trade_pnl']:.2f}\n"
-        f"🔻 Worst Trade: ₹{daily_stats['worst_trade_pnl']:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -409,31 +461,25 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
     qty = pos["qty"]
     curr_sym = "$" if sym_cfg["base_curr"] == "USDT" else "₹"
 
-    # Breakeven Lock at 1:1 move
     risk_distance = abs(pos["entry"] - pos["sl"])
     if curr_price >= (pos["entry"] + risk_distance) and pos["sl"] < pos["entry"]:
         pos["sl"] = pos["entry"]
         save_state(active_positions)
         send_telegram(f"🛡️ BREAKEVEN ACTIVATED (1:1 Hit)\nPair: {name}\nSL locked to Entry: {curr_sym}{pos['entry']:.4f}")
 
-    # Full Take-Profit Target (1:2 R:R)
     if pos.get("tp", 0.0) > 0 and curr_price >= pos["tp"]:
         success, _ = place_coindcx_order(coindcx_pair, "sell", qty)
         if success:
             trade_pnl = (curr_price - pos["entry"]) * qty
             inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
             daily_realized_pnl_inr += inr_pnl
-
             daily_stats["total_trades"] += 1
             daily_stats["wins"] += 1
-            daily_stats["best_trade_pnl"] = max(daily_stats["best_trade_pnl"], inr_pnl)
-
             cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
             send_telegram(
                 f"🎯 TAKE PROFIT TARGET FILLED (1:{TARGET_RR_RATIO})\n\n"
                 f"Asset: {name}\n"
                 f"Volume (Lot): {pos.get('lot', 0.0):.5f} Lot\n"
-                f"Quantity: {qty} units\n"
                 f"Exit Price: {curr_sym}{curr_price:.4f}\n"
                 f"Net Profit: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
                 reply_markup=get_control_keyboard()
@@ -442,7 +488,6 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
             save_state(active_positions)
             return
 
-    # Trailing Stop Loss
     if curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
         new_sl = curr_price - trailing_gap
@@ -455,23 +500,18 @@ def manage_trailing_sl(name, sym_cfg, curr_price):
             trade_pnl = (curr_price - pos["entry"]) * qty
             inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
             daily_realized_pnl_inr += inr_pnl
-
             daily_stats["total_trades"] += 1
             if inr_pnl >= 0:
                 daily_stats["wins"] += 1
             else:
                 daily_stats["losses"] += 1
-            daily_stats["best_trade_pnl"] = max(daily_stats["best_trade_pnl"], inr_pnl)
-            daily_stats["worst_trade_pnl"] = min(daily_stats["worst_trade_pnl"], inr_pnl)
 
             cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
             send_telegram(
                 f"🛑 STOP LOSS / TRAILING HIT\n\n"
                 f"Asset: {name}\n"
-                f"Volume (Lot): {pos.get('lot', 0.0):.5f} Lot\n"
                 f"Exit Price: {curr_sym}{curr_price:.4f}\n"
-                f"PnL: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})\n"
-                f"Preserving capital for next SIP weight setup.",
+                f"PnL: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
                 reply_markup=get_control_keyboard()
             )
             pos["side"] = None
@@ -608,19 +648,22 @@ def handle_incoming_users():
                                 send_telegram(generate_status_text(u_name), chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_balance":
                                 answer_callback_query(cb["id"], "Wallets Checked")
-                                inr_b, usdt_b = get_coindcx_balances()
+                                inr_b, usdt_b, _ = get_coindcx_balances()
                                 send_telegram(
                                     f"💰 Broker Wallet Balances:\n\n"
                                     f"🇮🇳 INR Wallet: ₹{inr_b:.2f}\n"
                                     f"💵 USDT Wallet: ${usdt_b:.2f}",
                                     chat_id=sender_id, reply_markup=get_control_keyboard()
                                 )
+                            elif cb_data == "cmd_sync_now":
+                                answer_callback_query(cb["id"], "Syncing with CoinDCX...")
+                                sync_existing_holdings_from_exchange()
+                                send_telegram("✅ Sync complete. Checked CoinDCX holdings.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_weight_calc":
-                                answer_callback_query(cb["id"], "Calculating Weight Breakdown...")
-                                inr_b, usdt_b = get_coindcx_balances()
+                                answer_callback_query(cb["id"], "Calculating...")
+                                inr_b, usdt_b, _ = get_coindcx_balances()
                                 send_telegram(generate_sip_breakdown_text(inr_b, usdt_b), chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_toggle_weight":
-                                # Cycle weight: 10% -> 15% -> 20% -> 5% -> 10%
                                 if WEIGHT_ALLOCATION_PCT == 0.10:
                                     WEIGHT_ALLOCATION_PCT = 0.15
                                 elif WEIGHT_ALLOCATION_PCT == 0.15:
@@ -629,8 +672,8 @@ def handle_incoming_users():
                                     WEIGHT_ALLOCATION_PCT = 0.05
                                 else:
                                     WEIGHT_ALLOCATION_PCT = 0.10
-                                answer_callback_query(cb["id"], f"Weight set to {int(WEIGHT_ALLOCATION_PCT*100)}%")
-                                send_telegram(f"⚖️ SIP Weight Allocation adjusted to **{int(WEIGHT_ALLOCATION_PCT*100)}% of Wallet Balance**.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                answer_callback_query(cb["id"], f"Weight: {int(WEIGHT_ALLOCATION_PCT*100)}%")
+                                send_telegram(f"⚖️ SIP Weight Allocation adjusted to **{int(WEIGHT_ALLOCATION_PCT*100)}%**.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_toggle_rr":
                                 if TARGET_RR_RATIO == 2.0:
                                     TARGET_RR_RATIO = 3.0
@@ -638,8 +681,8 @@ def handle_incoming_users():
                                     TARGET_RR_RATIO = 1.5
                                 else:
                                     TARGET_RR_RATIO = 2.0
-                                answer_callback_query(cb["id"], f"R:R set to 1:{TARGET_RR_RATIO}")
-                                send_telegram(f"🎯 Target Risk-to-Reward adjusted to **1:{TARGET_RR_RATIO}**.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                                answer_callback_query(cb["id"], f"R:R 1:{TARGET_RR_RATIO}")
+                                send_telegram(f"🎯 Target R:R set to **1:{TARGET_RR_RATIO}**.", chat_id=sender_id, reply_markup=get_control_keyboard())
                             elif cb_data == "cmd_analytics":
                                 answer_callback_query(cb["id"], "Analytics Loaded")
                                 send_telegram(generate_analytics_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
@@ -693,12 +736,15 @@ def handle_incoming_users():
 threading.Thread(target=handle_incoming_users, daemon=True).start()
 threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
 
+# Sync active holdings directly from CoinDCX on boot
+sync_existing_holdings_from_exchange()
+
 print("Master SIP Weight & Lot Engine Online...")
-send_telegram("🔥 Broker SIP-Weight Terminal Online!\nReal-time Dynamic Sizing by Balance, Quantity & Lot Size Active.", reply_markup=get_control_keyboard())
+send_telegram("🔥 Broker SIP-Weight Terminal Online!\nReal-time Dynamic Sizing & CoinDCX Auto-Sync Active.", reply_markup=get_control_keyboard())
 
 # Main Scan Cycle
 while True:
-    inr_bal, usdt_bal = get_coindcx_balances()
+    inr_bal, usdt_bal, _ = get_coindcx_balances()
     for name, sym_cfg in SYMBOLS.items():
         scan_symbol(name, sym_cfg, inr_bal, usdt_bal)
         time.sleep(0.3)
