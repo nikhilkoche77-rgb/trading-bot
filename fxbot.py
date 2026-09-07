@@ -10,91 +10,158 @@ import requests
 import pandas as pd
 import numpy as np
 
-# --- TELEGRAM CONFIG ---
-TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
-ADMIN_CHAT_IDS = [
-    "1345385952",           # Admin 1
-    "SECOND_USER_CHAT_ID"   # Admin 2
-]
+# ==========================================
+# 1. CONFIGURATION & KEYS
+# ==========================================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw")
+ADMIN_CHAT_IDS = ["1345385952"]
 
-# --- COINDCX API CREDENTIALS ---
-COINDCX_KEY = os.getenv("COINDCX_API_KEY", "YOUR_COINDCX_KEY_HERE")
-COINDCX_SECRET = os.getenv("COINDCX_SECRET_KEY", "YOUR_COINDCX_SECRET_HERE")
+# CoinDCX Credentials
+COINDCX_KEY = os.getenv("3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409")
+COINDCX_SECRET = os.getenv("b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e")
 
-# --- MULTI-STYLE RATIO MATRICES ---
-DEFAULT_SCALP_RR = 2.0      # Scalp Cycle: 1:1.5 -> 1:2.0
-DEFAULT_INTRADAY_RR = 3.0   # Intraday Cycle: 1:2.0 -> 1:3.0 -> 1:4.0 -> 1:5.0
-SWING_MAX_RUNNER_RR = 20.0  # Swing Runner Max Horizon: 1:20.0
+# Delta Exchange Credentials
+DELTA_BASE_URL = os.getenv("DELTA_BASE_URL", "https://api.delta.exchange")
+DELTA_API_KEY = os.getenv("v6itEa7m3KKFwtUsAssZ4pbNqz2glG")
+DELTA_API_SECRET = os.getenv("DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq")
 
-WEIGHT_ALLOCATION_PCT = 0.10   
-MIN_TRADE_INR = 100.0          
-MIN_TRADE_USDT = 1.20          
-MAX_TRADE_INR = 600.0          
-MAX_TRADE_USDT = 7.00          
+# Risk & Execution Parameters
+DEFAULT_SCALP_RR = 2.0
+DEFAULT_INTRADAY_RR = 3.0
+SWING_MAX_RUNNER_RR = 20.0
 
-MAX_PARALLEL_TRADES = 4        
-DAILY_MAX_LOSS_INR = 45.0      
-COOL_OFF_MINUTES = 15          
-MAX_SPREAD_TOLERANCE_PCT = 0.50 
-MIN_ORDER_BOOK_IMBALANCE = 1.30 
+WEIGHT_ALLOCATION_PCT = 0.10
+MIN_TRADE_INR = 100.0
+MAX_TRADE_INR = 600.0
+MIN_TRADE_USDT = 2.0
+MAX_TRADE_USDT = 10.0
 
-STATE_FILE = "trades_state.json"
+MAX_PARALLEL_TRADES = 4
+STATE_FILE = "dual_trades_state.json"
 is_paused = False
-daily_realized_pnl_inr = 0.0
-cool_off_tracker = {}
 
-daily_stats = {
-    "total_trades": 0,
-    "wins": 0,
-    "losses": 0,
-    "best_trade_pnl": 0.0,
-    "worst_trade_pnl": 0.0
-}
-
-# --- UNIFIED ASSETS & PRECISION MAPPINGS ---
+# Unified Watchlist (Mapped for Both Platforms)
 SYMBOLS = {
-    "XAU/USDT": {"base_curr": "USDT", "target_coin": "PAXG", "binance": "PAXGUSDT", "pair": "B-PAXG_USDT", "coindcx": "PAXGUSDT", "step": 4, "lot_contract": 100.0, "price_dec": 2},
-    "EUR/USDT": {"base_curr": "USDT", "target_coin": "EUR", "binance": "EURUSDT", "pair": "B-EUR_USDT", "coindcx": "EURUSDT", "step": 4, "lot_contract": 100000.0, "price_dec": 4},
-    "USDT/INR": {"base_curr": "INR", "target_coin": "USDT", "binance": "USDCUSDT", "pair": "B-USDT_INR", "coindcx": "USDTINR", "step": 2, "lot_contract": 100000.0, "price_dec": 2},
-    "GOLD/INR": {"base_curr": "INR", "target_coin": "PAXG", "binance": "PAXGUSDT", "pair": "B-PAXG_INR", "coindcx": "PAXGINR", "step": 4, "lot_contract": 100.0, "price_dec": 2},
-
-    "BTC/USDT": {"base_curr": "USDT", "target_coin": "BTC", "binance": "BTCUSDT", "pair": "B-BTC_USDT", "coindcx": "BTCUSDT", "step": 5, "lot_contract": 1.0, "price_dec": 2},
-    "ETH/USDT": {"base_curr": "USDT", "target_coin": "ETH", "binance": "ETHUSDT", "pair": "B-ETH_USDT", "coindcx": "ETHUSDT", "step": 4, "lot_contract": 1.0, "price_dec": 2},
-    "SOL/USDT": {"base_curr": "USDT", "target_coin": "SOL", "binance": "SOLUSDT", "pair": "B-SOL_USDT", "coindcx": "SOLUSDT", "step": 3, "lot_contract": 1.0, "price_dec": 2},
-    "XRP/USDT": {"base_curr": "USDT", "target_coin": "XRP", "binance": "XRPUSDT", "pair": "B-XRP_USDT", "coindcx": "XRPUSDT", "step": 1, "lot_contract": 1.0, "price_dec": 4},
-    "DOGE/USDT": {"base_curr": "USDT", "target_coin": "DOGE", "binance": "DOGEUSDT", "pair": "B-DOGE_USDT", "coindcx": "DOGEUSDT", "step": 0, "lot_contract": 1000.0, "price_dec": 5},
-    "PEPE/USDT": {"base_curr": "USDT", "target_coin": "PEPE", "binance": "PEPEUSDT", "pair": "B-PEPE_USDT", "coindcx": "PEPEUSDT", "step": 0, "lot_contract": 1000000.0, "price_dec": 8},
-    "SHIB/USDT": {"base_curr": "USDT", "target_coin": "SHIB", "binance": "SHIBUSDT", "pair": "B-SHIB_USDT", "coindcx": "SHIBUSDT", "step": 0, "lot_contract": 100000.0, "price_dec": 8},
-    "SUI/USDT": {"base_curr": "USDT", "target_coin": "SUI", "binance": "SUIUSDT", "pair": "B-SUI_USDT", "coindcx": "SUIUSDT", "step": 1, "lot_contract": 1.0, "price_dec": 4},
-    "NEAR/USDT": {"base_curr": "USDT", "target_coin": "NEAR", "binance": "NEARUSDT", "pair": "B-NEAR_USDT", "coindcx": "NEARUSDT", "step": 2, "lot_contract": 1.0, "price_dec": 3},
-    "AVAX/USDT": {"base_curr": "USDT", "target_coin": "AVAX", "binance": "AVAXUSDT", "pair": "B-AVAX_USDT", "coindcx": "AVAXUSDT", "step": 2, "lot_contract": 1.0, "price_dec": 2},
-    "WIF/USDT": {"base_curr": "USDT", "target_coin": "WIF", "binance": "WIFUSDT", "pair": "B-WIF_USDT", "coindcx": "WIFUSDT", "step": 2, "lot_contract": 1.0, "price_dec": 4},
-    "LINK/USDT": {"base_curr": "USDT", "target_coin": "LINK", "binance": "LINKUSDT", "pair": "B-LINK_USDT", "coindcx": "LINKUSDT", "step": 2, "lot_contract": 1.0, "price_dec": 3},
-    "FTM/USDT": {"base_curr": "USDT", "target_coin": "FTM", "binance": "FTMUSDT", "pair": "B-FTM_USDT", "coindcx": "FTMUSDT", "step": 1, "lot_contract": 1.0, "price_dec": 4},
-
-    "BTC/INR": {"base_curr": "INR", "target_coin": "BTC", "binance": "BTCUSDT", "pair": "B-BTC_INR", "coindcx": "BTCINR", "step": 5, "lot_contract": 1.0, "price_dec": 2},
-    "ETH/INR": {"base_curr": "INR", "target_coin": "ETH", "binance": "ETHUSDT", "pair": "B-ETH_INR", "coindcx": "ETHINR", "step": 4, "lot_contract": 1.0, "price_dec": 2},
-    "SOL/INR": {"base_curr": "INR", "target_coin": "SOL", "binance": "SOLUSDT", "pair": "B-SOL_INR", "coindcx": "SOLINR", "step": 3, "lot_contract": 1.0, "price_dec": 2},
-    "XRP/INR": {"base_curr": "INR", "target_coin": "XRP", "binance": "XRPUSDT", "pair": "B-XRP_INR", "coindcx": "XRPINR", "step": 1, "lot_contract": 1.0, "price_dec": 2},
-    "DOGE/INR": {"base_curr": "INR", "target_coin": "DOGE", "binance": "DOGEUSDT", "pair": "B-DOGE_INR", "coindcx": "DOGEINR", "step": 0, "lot_contract": 100.0, "price_dec": 4},
-    "ADA/INR": {"base_curr": "INR", "target_coin": "ADA", "binance": "ADAUSDT", "pair": "B-ADA_INR", "coindcx": "ADAINR", "step": 1, "lot_contract": 10.0, "price_dec": 2},
-    "PEPE/INR": {"base_curr": "INR", "target_coin": "PEPE", "binance": "PEPEUSDT", "pair": "B-PEPE_INR", "coindcx": "PEPEINR", "step": 0, "lot_contract": 1000000.0, "price_dec": 8},
-    "BONK/INR": {"base_curr": "INR", "target_coin": "BONK", "binance": "BONKUSDT", "pair": "B-BONK_INR", "coindcx": "BONKINR", "step": 0, "lot_contract": 100000.0, "price_dec": 8},
-    "RENDER/INR": {"base_curr": "INR", "target_coin": "RENDER", "binance": "RENDERUSDT", "pair": "B-RENDER_INR", "coindcx": "RENDERINR", "step": 2, "lot_contract": 1.0, "price_dec": 2}
+    "BTC/USDT": {"base": "USDT", "coindcx_pair": "B-BTC_USDT", "delta_symbol": "BTCUSD", "binance": "BTCUSDT", "step": 5, "p_dec": 2},
+    "ETH/USDT": {"base": "USDT", "coindcx_pair": "B-ETH_USDT", "delta_symbol": "ETHUSD", "binance": "ETHUSDT", "step": 4, "p_dec": 2},
+    "SOL/USDT": {"base": "USDT", "coindcx_pair": "B-SOL_USDT", "delta_symbol": "SOLUSDT", "binance": "SOLUSDT", "step": 3, "p_dec": 2},
+    "XRP/USDT": {"base": "USDT", "coindcx_pair": "B-XRP_USDT", "delta_symbol": "XRPUSDT", "binance": "XRPUSDT", "step": 1, "p_dec": 4},
+    "DOGE/USDT": {"base": "USDT", "coindcx_pair": "B-DOGE_USDT", "delta_symbol": "DOGEUSDT", "binance": "DOGEUSDT", "step": 0, "p_dec": 5},
+    "PEPE/USDT": {"base": "USDT", "coindcx_pair": "B-PEPE_USDT", "delta_symbol": "PEPEUSDT", "binance": "PEPEUSDT", "step": 0, "p_dec": 8},
+    "SUI/USDT": {"base": "USDT", "coindcx_pair": "B-SUI_USDT", "delta_symbol": "SUIUSDT", "binance": "SUIUSDT", "step": 1, "p_dec": 4},
+    "NEAR/USDT": {"base": "USDT", "coindcx_pair": "B-NEAR_USDT", "delta_symbol": "NEARUSDT", "binance": "NEARUSDT", "step": 2, "p_dec": 3},
+    "BTC/INR": {"base": "INR", "coindcx_pair": "B-BTC_INR", "delta_symbol": None, "binance": "BTCUSDT", "step": 5, "p_dec": 2},
+    "SOL/INR": {"base": "INR", "coindcx_pair": "B-SOL_INR", "delta_symbol": None, "binance": "SOLUSDT", "step": 3, "p_dec": 2}
 }
 
-def calculate_lot_size(qty, lot_contract):
-    lot = qty / lot_contract
-    return round(lot, 5) if lot < 0.01 else round(lot, 3)
+# ==========================================
+# 2. COINDCX ENGINE (SPOT)
+# ==========================================
+def coindcx_auth_post(endpoint, body):
+    timeStamp = int(round(time.time() * 1000))
+    body["timestamp"] = timeStamp
+    json_payload = json.dumps(body, separators=(',', ':'))
+    signature = hmac.new(COINDCX_SECRET.encode(), json_payload.encode(), hashlib.sha256).hexdigest()
+    headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': COINDCX_KEY, 'X-AUTH-SIGNATURE': signature}
+    try:
+        res = requests.post(f"https://api.coindcx.com{endpoint}", data=json_payload, headers=headers, timeout=8)
+        return res.status_code == 200, res.json()
+    except Exception as e:
+        return False, str(e)
 
-def calculate_sip_weight_allocation(base_curr, inr_bal, usdt_bal):
-    bal = inr_bal if base_curr == "INR" else usdt_bal
-    raw_amount = bal * WEIGHT_ALLOCATION_PCT
-    min_limit = MIN_TRADE_INR if base_curr == "INR" else MIN_TRADE_USDT
-    max_limit = MAX_TRADE_INR if base_curr == "INR" else MAX_TRADE_USDT
-    return max(min_limit, min(raw_amount, max_limit))
+def get_coindcx_balances():
+    success, data = coindcx_auth_post("/exchange/v1/users/balances", {})
+    inr_bal, usdt_bal = 0.0, 0.0
+    if success and isinstance(data, list):
+        for item in data:
+            if item.get("currency") == "INR":
+                inr_bal = float(item.get("balance", 0.0))
+            elif item.get("currency") == "USDT":
+                usdt_bal = float(item.get("balance", 0.0))
+    return inr_bal, usdt_bal
 
-# --- PERSISTENT STATE ---
+def place_coindcx_order(market_pair, side, quantity):
+    body = {"side": side.lower(), "order_type": "market_order", "market": market_pair, "total_quantity": quantity}
+    return coindcx_auth_post("/exchange/v1/orders/create", body)
+
+# ==========================================
+# 3. DELTA EXCHANGE ENGINE (FUTURES)
+# ==========================================
+def delta_auth_request(method, endpoint, payload=""):
+    timestamp = str(int(time.time()))
+    message = method + timestamp + endpoint + "" + payload
+    signature = hmac.new(DELTA_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "api-key": DELTA_API_KEY, "signature": signature,
+        "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
+    }
+    url = f"{DELTA_BASE_URL}{endpoint}"
+    try:
+        if method == "GET":
+            res = requests.get(url, headers=headers, timeout=8)
+        else:
+            res = requests.post(url, headers=headers, data=payload, timeout=8)
+        return res.status_code in [200, 201], res.json()
+    except Exception as e:
+        return False, {"error": str(e)}
+
+def get_delta_wallet_balance():
+    success, data = delta_auth_request("GET", "/v2/wallet/balances")
+    usdt_bal = 0.0
+    if success and data.get("success"):
+        for asset in data.get("result", []):
+            if asset.get("asset_symbol") == "USDT":
+                usdt_bal = float(asset.get("available_balance", 0.0))
+                break
+    return usdt_bal
+
+def place_delta_order(product_symbol, side, size):
+    payload = json.dumps({"product_symbol": product_symbol, "size": int(size), "side": side.lower(), "order_type": "market_order"})
+    return delta_auth_request("POST", "/v2/orders", payload=payload)
+
+# ==========================================
+# 4. DATA ENGINE (BINANCE LEAD)
+# ==========================================
+def is_btc_healthy():
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
+        resp = requests.get(url, timeout=4).json()
+        closes = [float(c[4]) for c in resp]
+        ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
+        drop_pct = ((closes[-1] - float(resp[-1][1])) / float(resp[-1][1])) * 100
+        return not (drop_pct < -0.85 or closes[-1] < ema20)
+    except Exception:
+        return True
+
+def check_binance_lead(symbol_binance):
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
+        resp = requests.get(url, timeout=4).json()
+        candles = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in resp]
+        df = pd.DataFrame(candles, columns=['open', 'high', 'low', 'close', 'volume'])
+        last = df.iloc[-1]
+        vol_avg = df['volume'].iloc[-6:-1].mean()
+        gain = ((last['close'] - last['open']) / last['open']) * 100
+        surge = last['volume'] > (vol_avg * 1.8)
+        return (gain >= 0.25 and surge), gain, df
+    except Exception:
+        return False, 0.0, None
+
+def calculate_technical_indicators(df, length=14):
+    high, low, close = df['high'], df['low'], df['close']
+    tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(length).mean()
+    up, down = high - high.shift(1), low.shift(1) - low
+    p_dm = np.where((up > down) & (up > 0), up, 0.0)
+    m_dm = np.where((down > up) & (down > 0), down, 0.0)
+    p_di = 100 * (pd.Series(p_dm, index=df.index).rolling(length).mean() / atr)
+    m_di = 100 * (pd.Series(m_dm, index=df.index).rolling(length).mean() / atr)
+    adx = (100 * (p_di - m_di).abs() / (p_di + m_di)).rolling(length).mean()
+    return atr, adx
+
+# ==========================================
+# 5. STATE MANAGEMENT & PARALLEL EXECUTION
+# ==========================================
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -102,737 +169,159 @@ def load_state():
                 return json.load(f)
         except Exception:
             pass
-    return {name: {"side": None, "style": "INTRADAY", "target_rr": 3.0, "entry": 0.0, "sl": 0.0, "tp": 0.0, "best_price": 0.0, "atr": 0.0, "qty": 0.0, "curr": "INR", "lot": 0.0, "amount": 0.0} for name in SYMBOLS}
+    return {name: {"side": None, "coindcx_qty": 0.0, "delta_size": 0, "entry": 0.0, "sl": 0.0, "tp": 0.0, "best_price": 0.0, "atr": 0.0, "style": "INTRADAY"} for name in SYMBOLS}
 
 def save_state(state):
     try:
         with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
+            json.dump(state, f, indent=4)
     except Exception as e:
         print(f"State save error: {e}")
 
 active_positions = load_state()
 
-# --- COINDCX API EXECUTION ---
-def coindcx_auth_post(endpoint, body):
-    timeStamp = int(round(time.time() * 1000))
-    body["timestamp"] = timeStamp
-    json_payload = json.dumps(body, separators=(',', ':'))
-    signature = hmac.new(COINDCX_SECRET.encode('utf-8'), json_payload.encode('utf-8'), hashlib.sha256).hexdigest()
-    headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': COINDCX_KEY, 'X-AUTH-SIGNATURE': signature}
-    try:
-        res = requests.post(f"https://api.coindcx.com{endpoint}", data=json_payload, headers=headers, timeout=10)
-        return res.status_code == 200, res.json()
-    except Exception as e:
-        return False, str(e)
+def execute_dual_exit(name, sym_cfg, reason="EXIT"):
+    pos = active_positions[name]
+    # Exit CoinDCX Spot
+    if pos["coindcx_qty"] > 0:
+        place_coindcx_order(sym_cfg["coindcx_pair"], "sell", pos["coindcx_qty"])
+    # Exit Delta Futures
+    if pos["delta_size"] > 0 and sym_cfg["delta_symbol"]:
+        place_delta_order(sym_cfg["delta_symbol"], "sell", pos["delta_size"])
 
-def get_coindcx_balances():
-    success, data = coindcx_auth_post("/exchange/v1/users/balances", {})
-    inr_bal = 0.0
-    usdt_bal = 0.0
-    raw_balances = {}
-    if success and isinstance(data, list):
-        for item in data:
-            curr = item.get("currency", "")
-            b_val = float(item.get("balance", 0.0))
-            raw_balances[curr] = b_val
-            if curr == "INR":
-                inr_bal = b_val
-            elif curr == "USDT":
-                usdt_bal = b_val
-    return inr_bal, usdt_bal, raw_balances
-
-def get_live_market_price(market_code, pair_name):
-    try:
-        url = "https://api.coindcx.com/exchange/ticker"
-        res = requests.get(url, timeout=3).json()
-        if isinstance(res, list):
-            for t in res:
-                if t.get("market") == market_code:
-                    return float(t.get("last_price", 0.0))
-    except Exception:
-        pass
-    try:
-        url = f"https://public.coindcx.com/market_data/candles?pair={pair_name}&interval=1m&limit=2"
-        r = requests.get(url, timeout=3).json()
-        if isinstance(r, list) and len(r) > 0:
-            return float(r[0]['close'])
-    except Exception:
-        pass
-    return 0.0
-
-def sync_existing_holdings_from_exchange():
-    _, _, raw_balances = get_coindcx_balances()
-    synced_any = False
-
-    for name, cfg in SYMBOLS.items():
-        t_coin = cfg.get("target_coin")
-        if not t_coin or t_coin in ["INR", "USDT"]:
-            continue
-
-        holding_qty = raw_balances.get(t_coin, 0.0)
-        curr_price = get_live_market_price(cfg["coindcx"], cfg["pair"])
-
-        if curr_price > 0 and (holding_qty * curr_price) >= 90.0:
-            if active_positions[name].get("side") is None:
-                step = cfg["step"]
-                p_dec = cfg.get("price_dec", 4)
-                clean_qty = round(holding_qty, step) if step > 0 else math.floor(holding_qty)
-                lot_size = calculate_lot_size(clean_qty, cfg.get("lot_contract", 1.0))
-                approx_amount = round(clean_qty * curr_price, 2)
-                initial_sl = round(curr_price * 0.985, p_dec)
-
-                active_positions[name] = {
-                    "side": "BUY",
-                    "style": "🎯 INTRADAY",
-                    "target_rr": DEFAULT_INTRADAY_RR,
-                    "entry": curr_price,
-                    "sl": initial_sl,
-                    "tp": round(curr_price + ((curr_price - initial_sl) * DEFAULT_INTRADAY_RR), p_dec),
-                    "best_price": curr_price,
-                    "atr": curr_price * 0.01,
-                    "qty": clean_qty,
-                    "curr": cfg["base_curr"],
-                    "lot": lot_size,
-                    "amount": approx_amount
-                }
-                synced_any = True
-                send_telegram(
-                    f"🔄 AUTO-SYNCED POSITION DETECTED\n\n"
-                    f"Asset: {name} [🎯 INTRADAY 1:{DEFAULT_INTRADAY_RR}]\n"
-                    f"Units: {clean_qty} ({lot_size:.4f} Lot)\n"
-                    f"Entry: {curr_price:.{p_dec}f}\n"
-                    f"Live Value: {cfg['base_curr']} {approx_amount:.2f}",
-                    reply_markup=get_control_keyboard()
-                )
-
-    if synced_any:
-        save_state(active_positions)
-
-def place_coindcx_order(market_pair, side, quantity):
-    body = {
-        "side": side.lower(),
-        "order_type": "market_order",
-        "market": market_pair,
-        "total_quantity": quantity
-    }
-    success, resp = coindcx_auth_post("/exchange/v1/orders/create", body)
-    if success and "orders" in resp:
-        order_id = resp["orders"][0].get("id")
-        time.sleep(1.2)
-        ok, detail = coindcx_auth_post("/exchange/v1/orders/status", {"id": order_id})
-        if ok and detail.get("status") in ["filled", "open"]:
-            return True, resp
-    return success, resp
-
-def emergency_close_all():
-    closed_count = 0
-    for p_name, pos in active_positions.items():
-        if pos.get("side") is not None:
-            pair_code = SYMBOLS[p_name]["coindcx"]
-            place_coindcx_order(pair_code, "sell", pos["qty"])
-            pos["side"] = None
-            closed_count += 1
-    save_state(active_positions)
-    return closed_count
-
-# --- ORDER BOOK & BTC INTEGRITY ---
-def check_orderbook_metrics(pair_name):
-    try:
-        url = f"https://public.coindcx.com/market_data/orderbook?pair={pair_name}"
-        r = requests.get(url, timeout=4).json()
-        bids = r.get("bids", {})
-        asks = r.get("asks", {})
-        if bids and asks:
-            bid_prices = sorted([float(p) for p in bids.keys()], reverse=True)
-            ask_prices = sorted([float(p) for p in asks.keys()])
-            best_bid = bid_prices[0]
-            best_ask = ask_prices[0]
-
-            if best_bid > 0:
-                spread_pct = ((best_ask - best_bid) / best_bid) * 100
-                if spread_pct > MAX_SPREAD_TOLERANCE_PCT:
-                    return False, "Spread too wide"
-
-            top_bids_vol = sum(float(bids[str(p)]) for p in bid_prices[:5] if str(p) in bids)
-            top_asks_vol = sum(float(asks[str(p)]) for p in ask_prices[:5] if str(p) in asks)
-
-            if top_asks_vol > 0:
-                imbalance_ratio = top_bids_vol / top_asks_vol
-                if imbalance_ratio < MIN_ORDER_BOOK_IMBALANCE:
-                    return False, "Weak buyers"
-
-            return True, "Passed"
-    except Exception:
-        pass
-    return True, "Bypass"
-
-def is_btc_healthy():
-    try:
-        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
-        resp = requests.get(url, timeout=4).json()
-        if not isinstance(resp, list) or len(resp) < 20:
-            return True
-
-        closes = [float(c[4]) for c in resp]
-        series = pd.Series(closes)
-        ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
-        last_price = closes[-1]
-        open_last = float(resp[-1][1])
-        drop_pct = ((last_price - open_last) / open_last) * 100
-
-        if drop_pct < -0.85 or last_price < ema20:
-            return False
-        return True
-    except Exception:
-        return True
-
-def check_binance_lead_signal(symbol_binance):
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
-        resp = requests.get(url, timeout=4).json()
-        if not isinstance(resp, list) or len(resp) < 10:
-            return False, 0.0
-
-        candles = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in resp]
-        df_b = pd.DataFrame(candles, columns=['open', 'high', 'low', 'close', 'volume'])
-
-        last_c = df_b.iloc[-1]
-        prev_vol_avg = df_b['volume'].iloc[-6:-1].mean()
-
-        price_gain_pct = ((last_c['close'] - last_c['open']) / last_c['open']) * 100
-        vol_surge = last_c['volume'] > (prev_vol_avg * 1.8)
-
-        if price_gain_pct >= 0.25 and vol_surge:
-            return True, price_gain_pct
-    except Exception:
-        pass
-    return False, 0.0
-
-def fetch_coindcx_candles(pair_name, interval="1m", limit=35):
-    try:
-        url = f"https://public.coindcx.com/market_data/candles?pair={pair_name}&interval={interval}&limit={limit}"
-        r = requests.get(url, timeout=6)
-        if r.status_code == 200:
-            raw = r.json()
-            if isinstance(raw, list) and len(raw) >= 20:
-                df = pd.DataFrame(raw)
-                df = df.iloc[::-1].reset_index(drop=True)
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                return df
-    except Exception:
-        pass
-    return None
-
-def calculate_technical_indicators(df, length=14):
-    high, low, close = df['high'], df['low'], df['close']
-    tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(length).mean()
-
-    up_move = high - high.shift(1)
-    down_move = low.shift(1) - low
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-
-    plus_di = 100 * (pd.Series(plus_dm, index=df.index).rolling(length).mean() / atr)
-    minus_di = 100 * (pd.Series(minus_dm, index=df.index).rolling(length).mean() / atr)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    adx = dx.rolling(length).mean()
-    return atr, adx
-
-# --- TELEGRAM CONTROLS & STATUS ---
-def get_control_keyboard():
-    keyboard = [
-        [
-            {"text": "📊 Live Terminal", "callback_data": "cmd_status"},
-            {"text": "💰 Wallets", "callback_data": "cmd_balance"}
-        ],
-        [
-            {"text": f"⚡ Scalp (1:{DEFAULT_SCALP_RR})", "callback_data": "cmd_toggle_scalp_rr"},
-            {"text": f"🎯 Intraday (1:{DEFAULT_INTRADAY_RR})", "callback_data": "cmd_toggle_intra_rr"}
-        ],
-        [
-            {"text": f"⚖️ SIP Sizing ({int(WEIGHT_ALLOCATION_PCT*100)}%)", "callback_data": "cmd_toggle_weight"},
-            {"text": "🏔️ Swing Max (1:20)", "callback_data": "cmd_swing_info"}
-        ],
-        [
-            {"text": "🔄 Refresh / Sync", "callback_data": "cmd_sync_now"},
-            {"text": "📋 SIP Breakdown", "callback_data": "cmd_weight_calc"}
-        ]
-    ]
-
-    active_sells = []
-    for p_name, pos in active_positions.items():
-        if pos.get("side") is not None:
-            active_sells.append({"text": f"🔴 Close {p_name}", "callback_data": f"sell_{p_name}"})
-
-    if active_sells:
-        keyboard.append(active_sells)
-
-    keyboard.append([
-        {"text": "📈 Performance Analytics", "callback_data": "cmd_analytics"},
-        {"text": "⏸️ Pause", "callback_data": "cmd_pause"},
-        {"text": "▶️ Resume", "callback_data": "cmd_resume"}
-    ])
-    keyboard.append([{"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_close_all"}])
-
-    return {"inline_keyboard": keyboard}
-
-def send_telegram(message, chat_id=None, reply_markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    recipients = [chat_id] if chat_id else [cid for cid in ADMIN_CHAT_IDS if cid != "SECOND_USER_CHAT_ID"]
-    for cid in recipients:
-        payload = {"chat_id": cid, "text": message}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        try:
-            requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"Telegram error: {e}")
-
-def answer_callback_query(callback_query_id, text=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
-    try:
-        requests.post(url, json={"callback_query_id": callback_query_id, "text": text}, timeout=5)
-    except Exception:
-        pass
-
-def generate_status_text(user_name="Trader"):
-    pos_summary = ""
-    has_active = False
-    total_unrealized_inr = 0.0
-
-    for p_name, pos in active_positions.items():
-        if pos.get("side") is not None:
-            has_active = True
-            curr_sym = "$" if pos.get("curr") == "USDT" else "₹"
-            p_dec = SYMBOLS[p_name].get("price_dec", 4)
-
-            latest_price = get_live_market_price(SYMBOLS[p_name]["coindcx"], SYMBOLS[p_name]["pair"])
-            if latest_price > 0:
-                pos["best_price"] = latest_price
-
-            cur_p = pos["best_price"]
-            ent_p = pos["entry"]
-            qty = pos["qty"]
-
-            running_pnl = (cur_p - ent_p) * qty
-            running_pct = ((cur_p - ent_p) / ent_p) * 100 if ent_p > 0 else 0.0
-            inr_running = (running_pnl * 90.0) if pos.get("curr") == "USDT" else running_pnl
-            total_unrealized_inr += inr_running
-
-            pos_summary += (
-                f"\n📌 {p_name} [{pos.get('style', '🎯 INTRADAY')} 1:{pos.get('target_rr', 3.0):.1f}]\n"
-                f"• Size: {pos.get('lot', 0.0):.4f} Lot | Capital: {curr_sym}{pos.get('amount', 0.0):.2f}\n"
-                f"• Entry: {curr_sym}{ent_p:.{p_dec}f} | Current: {curr_sym}{cur_p:.{p_dec}f}\n"
-                f"• SL: {curr_sym}{pos['sl']:.{p_dec}f} | Target: {curr_sym}{pos.get('tp', 0.0):.{p_dec}f}\n"
-                f"• 💰 Live PnL: {curr_sym}{running_pnl:+.4f} ({running_pct:+.2f}%)\n"
-            )
-
+    send_telegram(f"🚨 {reason}: Closed {name} on Both CoinDCX & Delta!")
+    pos["side"] = None
+    pos["coindcx_qty"] = 0.0
+    pos["delta_size"] = 0
     save_state(active_positions)
 
-    if not has_active:
-        pos_summary = "\n💤 No active market positions right now."
-
-    active_count = sum(1 for p in active_positions.values() if p.get("side") is not None)
-    return (
-        f"👑 Terminal Status ({user_name})\n"
-        f"Status: {'⏸️ PAUSED' if is_paused else '🟢 ONLINE'}\n"
-        f"Open Positions: {active_count}/{MAX_PARALLEL_TRADES}\n"
-        f"💵 Total Live PnL: ₹{total_unrealized_inr:+.2f}\n"
-        f"Net Closed PnL (Today): ₹{daily_realized_pnl_inr:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"ACTIVE TRADES & LIVE PROFIT:{pos_summary}\n"
-        f"━━━━━━━━━━━━━━━━━━━"
-    )
-
-def generate_analytics_text():
-    total = daily_stats["total_trades"]
-    win_rate = (daily_stats["wins"] / total * 100) if total > 0 else 0.0
-    return (
-        f"📊 PERFORMANCE REPORT\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔢 Total Trades: {total} | Wins: {daily_stats['wins']} | Losses: {daily_stats['losses']}\n"
-        f"🎯 Win Rate: {win_rate:.1f}%\n"
-        f"💰 Realized Net PnL: ₹{daily_realized_pnl_inr:.2f}\n"
-        f"🌟 Best Trade: ₹{daily_stats['best_trade_pnl']:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━"
-    )
-
-# --- DYNAMIC MULTI-TIER TRAILING & RISK SHIELD ENGINE ---
-def manage_trailing_sl(name, sym_cfg, curr_price):
-    global daily_realized_pnl_inr, cool_off_tracker, daily_stats
+def manage_trailing(name, sym_cfg, curr_price):
     pos = active_positions[name]
     if pos.get("side") is None:
         return
 
-    trailing_gap = pos["atr"] * 1.5
-    coindcx_pair = sym_cfg["coindcx"]
-    qty = pos["qty"]
-    curr_sym = "$" if sym_cfg["base_curr"] == "USDT" else "₹"
-    style = pos.get("style", "🎯 INTRADAY")
-    p_dec = sym_cfg.get("price_dec", 4)
+    risk_dist = abs(pos["entry"] - pos["sl"])
+    profit_dist = curr_price - pos["entry"]
 
-    risk_distance = abs(pos["entry"] - pos["sl"])
-    profit_distance = curr_price - pos["entry"]
-
-    # 1. Breakeven Lock at 1:1 move (Zero Risk Protection)
-    if curr_price >= (pos["entry"] + risk_distance) and pos["sl"] < pos["entry"]:
+    # 1:1 Breakeven Lock
+    if curr_price >= (pos["entry"] + risk_dist) and pos["sl"] < pos["entry"]:
         pos["sl"] = pos["entry"]
         save_state(active_positions)
-        send_telegram(f"🛡️ BREAKEVEN ACTIVATED (Risk Zero)\nPair: {name}\nStyle: {style}\nSL locked to Entry: {curr_sym}{pos['entry']:.{p_dec}f}")
+        send_telegram(f"🛡️ DUAL BREAKEVEN LOCKED: {name} SL cost par shift ho gaya.")
 
-    # 2. SWING MULTI-BAGGER RUNNER TRAIL (Up to 1:20 Horizon)
-    if "SWING" in style:
-        # Tier 4: Above 10x R:R -> Trail tightly by 0.5 ATR (Locks in ~85-90% of massive gains)
-        if profit_distance >= (risk_distance * 10.0):
-            ultra_sl = curr_price - (pos["atr"] * 0.5)
-            if ultra_sl > pos["sl"]:
-                pos["sl"] = ultra_sl
-                save_state(active_positions)
-        # Tier 3: Above 5x R:R -> Lock at least 4x profit guaranteed
-        elif profit_distance >= (risk_distance * 5.0):
-            lock_sl = pos["entry"] + (risk_distance * 3.5)
-            if lock_sl > pos["sl"]:
-                pos["sl"] = lock_sl
-                save_state(active_positions)
-        # Tier 2: Above 3x R:R -> Lock at least 1.5x profit guaranteed
-        elif profit_distance >= (risk_distance * 3.0):
-            mid_sl = pos["entry"] + (risk_distance * 1.5)
-            if mid_sl > pos["sl"]:
-                pos["sl"] = mid_sl
-                save_state(active_positions)
-
-        # Cap at 1:20 Max Target Exit
-        if curr_price >= pos.get("tp", 0.0):
-            success, _ = place_coindcx_order(coindcx_pair, "sell", qty)
-            if success:
-                trade_pnl = (curr_price - pos["entry"]) * qty
-                inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
-                daily_realized_pnl_inr += inr_pnl
-                daily_stats["total_trades"] += 1
-                daily_stats["wins"] += 1
-                cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
-                send_telegram(
-                    f"🏆 1:20 SWING RUNNER HARVESTED!\n\n"
-                    f"Asset: {name} [{style}]\n"
-                    f"Exit Price: {curr_sym}{curr_price:.{p_dec}f}\n"
-                    f"Massive Profit: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
-                    reply_markup=get_control_keyboard()
-                )
-                pos["side"] = None
-                save_state(active_positions)
-                return
-    else:
-        # Standard Scalp & Intraday Target Exit
-        if pos.get("tp", 0.0) > 0 and curr_price >= pos["tp"]:
-            success, _ = place_coindcx_order(coindcx_pair, "sell", qty)
-            if success:
-                trade_pnl = (curr_price - pos["entry"]) * qty
-                inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
-                daily_realized_pnl_inr += inr_pnl
-                daily_stats["total_trades"] += 1
-                daily_stats["wins"] += 1
-                cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
-                send_telegram(
-                    f"🎯 TARGET FILLED (1:{pos.get('target_rr', 2.0):.1f} R:R)\n\n"
-                    f"Asset: {name} [{style}]\n"
-                    f"Exit: {curr_sym}{curr_price:.{p_dec}f}\n"
-                    f"Profit: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
-                    reply_markup=get_control_keyboard()
-                )
-                pos["side"] = None
-                save_state(active_positions)
-                return
-
-    # 3. Dynamic Normal Trailing Stop Loss
-    if curr_price > pos["best_price"]:
+    # Target Hit
+    if curr_price >= pos["tp"]:
+        execute_dual_exit(name, sym_cfg, reason="🎯 TARGET HIT")
+    # SL Hit
+    elif curr_price <= pos["sl"]:
+        execute_dual_exit(name, sym_cfg, reason="🛑 STOP LOSS HIT")
+    # Dynamic Trail
+    elif curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
-        new_sl = curr_price - trailing_gap
+        new_sl = curr_price - (pos["atr"] * 1.5)
         if new_sl > pos["sl"]:
             pos["sl"] = new_sl
             save_state(active_positions)
-    elif curr_price <= pos["sl"]:
-        success, _ = place_coindcx_order(coindcx_pair, "sell", qty)
-        if success:
-            trade_pnl = (curr_price - pos["entry"]) * qty
-            inr_pnl = (trade_pnl * 90.0) if sym_cfg["base_curr"] == "USDT" else trade_pnl
-            daily_realized_pnl_inr += inr_pnl
-            daily_stats["total_trades"] += 1
-            if inr_pnl >= 0:
-                daily_stats["wins"] += 1
-            else:
-                daily_stats["losses"] += 1
 
-            cool_off_tracker[name] = time.time() + (COOL_OFF_MINUTES * 60)
-            send_telegram(
-                f"🛑 TRAILING / SL EXIT\n\n"
-                f"Asset: {name} [{style}]\n"
-                f"Exit Price: {curr_sym}{curr_price:.{p_dec}f}\n"
-                f"Closed PnL: {curr_sym}{trade_pnl:.2f} (~₹{inr_pnl:.2f})",
-                reply_markup=get_control_keyboard()
-            )
-            pos["side"] = None
-            save_state(active_positions)
-
-def scan_symbol(name, sym_cfg, inr_bal, usdt_bal):
-    global is_paused, cool_off_tracker
+def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
+    global is_paused
     active_count = sum(1 for p in active_positions.values() if p.get("side") is not None)
-    if is_paused or active_count >= MAX_PARALLEL_TRADES or daily_realized_pnl_inr <= -DAILY_MAX_LOSS_INR:
+    if is_paused or active_count >= MAX_PARALLEL_TRADES or not is_btc_healthy():
         return
 
-    if name in cool_off_tracker and time.time() < cool_off_tracker[name]:
-        return
-
-    base_curr = sym_cfg["base_curr"]
-    trade_allocation = calculate_sip_weight_allocation(base_curr, inr_bal, usdt_bal)
-
-    if base_curr == "INR" and inr_bal < trade_allocation:
-        return
-    if base_curr == "USDT" and usdt_bal < trade_allocation:
-        return
-
-    if not is_btc_healthy():
-        return
-
-    pair_code = sym_cfg["pair"]
-    coindcx_pair = sym_cfg["coindcx"]
-    binance_symbol = sym_cfg["binance"]
-    precision = sym_cfg["step"]
-    p_dec = sym_cfg.get("price_dec", 4)
-
-    passed_book, _ = check_orderbook_metrics(pair_code)
-    if not passed_book:
-        return
-
-    binance_surging, surge_gain = check_binance_lead_signal(binance_symbol)
-
-    df = fetch_coindcx_candles(pair_code, interval="1m", limit=35)
-    if df is None or len(df) < 25:
+    surging, gain, df = check_binance_lead(sym_cfg["binance"])
+    if not surging or df is None or len(df) < 25:
         return
 
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['atr'], df['adx'] = calculate_technical_indicators(df)
-    df['swing_high'] = df['high'].iloc[-10:-1].max()
-    df['swing_low'] = df['low'].iloc[-10:-1].min()
-
-    live_p = get_live_market_price(coindcx_pair, pair_code)
-    curr_price = live_p if live_p > 0 else float(df['close'].iloc[-1])
-    curr_open = float(df['open'].iloc[-1])
     
-    manage_trailing_sl(name, sym_cfg, curr_price)
+    curr_price = float(df['close'].iloc[-1])
+    manage_trailing(name, sym_cfg, curr_price)
 
-    adx_val = float(df['adx'].iloc[-1])
-    trend_strong = adx_val > 18.0
-    ema_bullish = float(df['ema20'].iloc[-1]) > float(df['ema50'].iloc[-1])
-    local_breakout = (curr_price > float(df['swing_high'].iloc[-1])) and (curr_price > curr_open)
-
-    should_enter = (
-        active_positions[name].get("side") is None
-        and binance_surging
-        and (ema_bullish or local_breakout)
-        and trend_strong
-    )
-
-    if should_enter:
-        # Dynamic Style & R:R Assignment
-        if adx_val > 35.0 and surge_gain > 0.80:
-            trade_style = "🏔️ SWING RUNNER"
-            assigned_rr = SWING_MAX_RUNNER_RR  # 1:20 Max Target
-        elif surge_gain > 0.40:
-            trade_style = "🎯 INTRADAY"
-            assigned_rr = DEFAULT_INTRADAY_RR   # 1:2, 1:3, 1:4, or 1:5
-        else:
-            trade_style = "⚡ SCALPING"
-            assigned_rr = DEFAULT_SCALP_RR      # 1:1.5 or 1:2
-
+    if active_positions[name].get("side") is None and float(df['adx'].iloc[-1]) > 18.0 and float(df['ema20'].iloc[-1]) > float(df['ema50'].iloc[-1]):
         atr_val = float(df['atr'].iloc[-1])
-        sl = max(float(df['swing_low'].iloc[-1]), curr_price - (atr_val * 1.5))
-        risk_dist = abs(curr_price - sl)
-        tp = curr_price + (risk_dist * assigned_rr)
+        sl = curr_price - (atr_val * 1.5)
+        tp = curr_price + (abs(curr_price - sl) * DEFAULT_INTRADAY_RR)
 
-        raw_qty = trade_allocation / curr_price
-        qty = round(raw_qty, precision) if precision > 0 else math.floor(raw_qty)
+        # 1. CoinDCX Allocation
+        coindcx_alloc = max(MIN_TRADE_INR if sym_cfg["base"] == "INR" else MIN_TRADE_USDT, 
+                            (c_inr if sym_cfg["base"] == "INR" else c_usdt) * WEIGHT_ALLOCATION_PCT)
+        cdcx_qty = round(coindcx_alloc / curr_price, sym_cfg["step"]) if sym_cfg["step"] > 0 else int(coindcx_alloc / curr_price)
 
-        if qty > 0:
-            lot_size = calculate_lot_size(qty, sym_cfg.get("lot_contract", 1.0))
-            exact_invested = round(qty * curr_price, 2)
+        # 2. Delta Allocation
+        delta_alloc = max(MIN_TRADE_USDT, min(d_usdt * WEIGHT_ALLOCATION_PCT, MAX_TRADE_USDT))
+        delta_contracts = max(1, int(delta_alloc / 1.0)) if sym_cfg["delta_symbol"] else 0
 
-            success, _ = place_coindcx_order(coindcx_pair, "buy", qty)
-            if success:
-                active_positions[name] = {
-                    "side": "BUY", "style": trade_style, "target_rr": assigned_rr,
-                    "entry": curr_price, "sl": sl, "tp": tp,
-                    "best_price": curr_price, "atr": atr_val, "qty": qty, 
-                    "curr": base_curr, "lot": lot_size, "amount": exact_invested
-                }
-                save_state(active_positions)
-                curr_sym = "$" if base_curr == "USDT" else "₹"
-                send_telegram(
-                    f"⚡ ORDER EXECUTED [{trade_style} 1:{assigned_rr:.1f}]\n\n"
-                    f"Asset: {name} ({base_curr})\n"
-                    f"Allocated Amount: {curr_sym}{exact_invested:.2f}\n"
-                    f"Quantity: {qty} ({lot_size:.4f} Lot)\n"
-                    f"Entry: {curr_sym}{curr_price:.{p_dec}f}\n"
-                    f"Stop Loss: {curr_sym}{sl:.{p_dec}f}\n"
-                    f"Target Target: {curr_sym}{tp:.{p_dec}f}\n"
-                    f"Protection: Auto-Breakeven & Multi-Tier Trailing Active",
-                    reply_markup=get_control_keyboard()
-                )
+        # Parallel Execution
+        cdcx_ok, _ = place_coindcx_order(sym_cfg["coindcx_pair"], "buy", cdcx_qty) if cdcx_qty > 0 else (False, None)
+        delta_ok, _ = place_delta_order(sym_cfg["delta_symbol"], "buy", delta_contracts) if delta_contracts > 0 else (False, None)
 
-# --- BACKGROUND THREADS ---
-def midnight_reset_scheduler():
-    global daily_realized_pnl_inr, cool_off_tracker, daily_stats
-    ist = timezone(timedelta(hours=5, minutes=30))
-    while True:
-        now = datetime.now(ist)
-        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
-        time.sleep((next_run - now).total_seconds())
+        if cdcx_ok or delta_ok:
+            active_positions[name] = {
+                "side": "BUY", "coindcx_qty": cdcx_qty if cdcx_ok else 0.0,
+                "delta_size": delta_contracts if delta_ok else 0,
+                "entry": curr_price, "sl": sl, "tp": tp, "best_price": curr_price,
+                "atr": atr_val, "style": "🎯 INTRADAY"
+            }
+            save_state(active_positions)
+            send_telegram(
+                f"⚡ PARALLEL ORDER FIRED!\n\n"
+                f"Asset: {name}\n"
+                f"• CoinDCX: {'✅ ' + str(cdcx_qty) + ' Units' if cdcx_ok else '❌ Failed'}\n"
+                f"• Delta: {'✅ ' + str(delta_contracts) + ' Contracts' if delta_ok else '❌ Skipped'}\n"
+                f"Entry: ${curr_price:.{sym_cfg['p_dec']}f} | SL: ${sl:.{sym_cfg['p_dec']}f} | TP: ${tp:.{sym_cfg['p_dec']}f}"
+            )
 
-        report = f"🌙 MIDNIGHT REPORT (IST)\n\n" + generate_analytics_text()
-        send_telegram(report)
+# ==========================================
+# 6. TELEGRAM ROUTING & BACKGROUND WORKERS
+# ==========================================
+def send_telegram(message, reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    for cid in ADMIN_CHAT_IDS:
+        try:
+            requests.post(url, json={"chat_id": cid, "text": message, "reply_markup": reply_markup}, timeout=8)
+        except Exception:
+            pass
 
-        daily_realized_pnl_inr = 0.0
-        cool_off_tracker.clear()
-        daily_stats = {"total_trades": 0, "wins": 0, "losses": 0, "best_trade_pnl": 0.0, "worst_trade_pnl": 0.0}
-
-def handle_incoming_users():
-    global is_paused, DEFAULT_SCALP_RR, DEFAULT_INTRADAY_RR, WEIGHT_ALLOCATION_PCT
-    last_update_id = 0
+def telegram_listener():
+    global is_paused
+    last_id = 0
     while True:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-            resp = requests.get(url, params={"offset": last_update_id + 1, "timeout": 20}, timeout=25).json()
-
-            if "result" in resp:
-                for update in resp["result"]:
-                    last_update_id = update["update_id"]
-
-                    if "callback_query" in update:
-                        cb = update["callback_query"]
-                        sender_id = str(cb["from"]["id"])
-                        cb_data = cb.get("data", "")
-                        u_name = cb["from"].get("first_name", "Trader")
-
-                        if sender_id in ADMIN_CHAT_IDS:
-                            if cb_data == "cmd_status":
-                                answer_callback_query(cb["id"], "Fetching Live Tickers...")
-                                send_telegram(generate_status_text(u_name), chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_balance":
-                                answer_callback_query(cb["id"], "Wallets Checked")
-                                inr_b, usdt_b, _ = get_coindcx_balances()
-                                send_telegram(
-                                    f"💰 Broker Wallet Balances:\n\n"
-                                    f"🇮🇳 INR Wallet: ₹{inr_b:.2f}\n"
-                                    f"💵 USDT Wallet: ${usdt_b:.2f}",
-                                    chat_id=sender_id, reply_markup=get_control_keyboard()
-                                )
-                            elif cb_data == "cmd_toggle_scalp_rr":
-                                # Cycle Scalp R:R: 1:1.5 -> 1:2.0 -> 1:1.5
-                                DEFAULT_SCALP_RR = 2.0 if DEFAULT_SCALP_RR == 1.5 else 1.5
-                                answer_callback_query(cb["id"], f"Scalp R:R 1:{DEFAULT_SCALP_RR}")
-                                send_telegram(f"⚡ Scalping Target set to **1:{DEFAULT_SCALP_RR}**.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_toggle_intra_rr":
-                                # Cycle Intraday R:R: 1:2.0 -> 1:3.0 -> 1:4.0 -> 1:5.0 -> 1:2.0
-                                if DEFAULT_INTRADAY_RR == 2.0:
-                                    DEFAULT_INTRADAY_RR = 3.0
-                                elif DEFAULT_INTRADAY_RR == 3.0:
-                                    DEFAULT_INTRADAY_RR = 4.0
-                                elif DEFAULT_INTRADAY_RR == 4.0:
-                                    DEFAULT_INTRADAY_RR = 5.0
-                                else:
-                                    DEFAULT_INTRADAY_RR = 2.0
-                                answer_callback_query(cb["id"], f"Intraday R:R 1:{DEFAULT_INTRADAY_RR}")
-                                send_telegram(f"🎯 Intraday Target set to **1:{DEFAULT_INTRADAY_RR}**.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_swing_info":
-                                answer_callback_query(cb["id"], "Swing Runner Active (Up to 1:20)")
-                                send_telegram(
-                                    "🏔️ **Swing Runner Protocol (1:20 Horizon):**\n\n"
-                                    "• **1:1 Hit:** SL locks to Entry (Zero Risk).\n"
-                                    "• **1:3 Hit:** SL moves to +1.5x (Guaranteed profit lock).\n"
-                                    "• **1:5 Hit:** SL moves to +3.5x profit.\n"
-                                    "• **1:10 Hit:** Tight 0.5 ATR trail milks the run up to 1:20 Target.\n"
-                                    "Loss protection ke sath open runner safe rehta hai.",
-                                    chat_id=sender_id, reply_markup=get_control_keyboard()
-                                )
-                            elif cb_data == "cmd_sync_now":
-                                answer_callback_query(cb["id"], "Refreshing Live PnL & Tickers...")
-                                sync_existing_holdings_from_exchange()
-                                send_telegram(generate_status_text(u_name), chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_toggle_weight":
-                                if WEIGHT_ALLOCATION_PCT == 0.10:
-                                    WEIGHT_ALLOCATION_PCT = 0.15
-                                elif WEIGHT_ALLOCATION_PCT == 0.15:
-                                    WEIGHT_ALLOCATION_PCT = 0.20
-                                elif WEIGHT_ALLOCATION_PCT == 0.20:
-                                    WEIGHT_ALLOCATION_PCT = 0.05
-                                else:
-                                    WEIGHT_ALLOCATION_PCT = 0.10
-                                answer_callback_query(cb["id"], f"Weight: {int(WEIGHT_ALLOCATION_PCT*100)}%")
-                                send_telegram(f"⚖️ Sizing adjusted to **{int(WEIGHT_ALLOCATION_PCT*100)}%**.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_analytics":
-                                answer_callback_query(cb["id"], "Analytics Loaded")
-                                send_telegram(generate_analytics_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_pause":
-                                is_paused = True
-                                answer_callback_query(cb["id"], "Paused")
-                                send_telegram("⏸️ Terminal Paused.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_resume":
-                                is_paused = False
-                                answer_callback_query(cb["id"], "Resumed")
-                                send_telegram("▶️ Terminal Active.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data == "cmd_close_all":
-                                answer_callback_query(cb["id"], "Exiting All")
-                                count = emergency_close_all()
-                                send_telegram(f"🚨 Panic Close: Exited {count} positions at market price.", chat_id=sender_id, reply_markup=get_control_keyboard())
-                            elif cb_data.startswith("sell_"):
-                                target_pair = cb_data.replace("sell_", "")
-                                if target_pair in active_positions and active_positions[target_pair].get("side") is not None:
-                                    pos = active_positions[target_pair]
-                                    pair_code = SYMBOLS[target_pair]["coindcx"]
-                                    success, _ = place_coindcx_order(pair_code, "sell", pos["qty"])
-                                    if success:
-                                        base_c = SYMBOLS[target_pair]["base_curr"]
-                                        curr_sym = "$" if base_c == "USDT" else "₹"
-                                        recvd = pos["best_price"] * pos["qty"]
-                                        answer_callback_query(cb["id"], f"Closed {target_pair}!")
-                                        send_telegram(
-                                            f"✅ MANUAL POSITION CLOSED\n\n"
-                                            f"📌 Asset: {target_pair}\n"
-                                            f"• Units: {pos['qty']}\n"
-                                            f"• Credited: {curr_sym}{recvd:.2f} ({base_c} Wallet)",
-                                            chat_id=sender_id,
-                                            reply_markup=get_control_keyboard()
-                                        )
-                                        pos["side"] = None
-                                        save_state(active_positions)
-                                    else:
-                                        answer_callback_query(cb["id"], "Sell Failed!")
-
-                    elif "message" in update and "text" in update["message"]:
-                        sender_id = str(update["message"]["chat"]["id"])
-                        u_name = update["message"]["from"].get("first_name", "Trader")
-                        if sender_id in ADMIN_CHAT_IDS:
-                            send_telegram(generate_status_text(u_name), chat_id=sender_id, reply_markup=get_control_keyboard())
-        except Exception as e:
-            print(f"Telegram loop error: {e}")
-        time.sleep(2)
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={last_id + 1}&timeout=15"
+            res = requests.get(url, timeout=20).json()
+            for update in res.get("result", []):
+                last_id = update["update_id"]
+                if "callback_query" in update:
+                    cb = update["callback_query"]
+                    data = cb.get("data")
+                    if data == "cmd_balance":
+                        c_inr, c_usdt = get_coindcx_balances()
+                        d_usdt = get_delta_wallet_balance()
+                        send_telegram(f"💰 DUAL WALLETS:\n\n🇮🇳 CoinDCX: ₹{c_inr:.2f} | ${c_usdt:.2f}\n🌐 Delta Exchange: ${d_usdt:.2f} USDT")
+                    elif data == "cmd_panic":
+                        for name, cfg in SYMBOLS.items():
+                            if active_positions[name].get("side"):
+                                execute_dual_exit(name, cfg, reason="🚨 PANIC EXIT")
+        except Exception:
+            pass
+        time.sleep(1)
 
 # Start workers
-threading.Thread(target=handle_incoming_users, daemon=True).start()
-threading.Thread(target=midnight_reset_scheduler, daemon=True).start()
+threading.Thread(target=telegram_listener, daemon=True).start()
 
-sync_existing_holdings_from_exchange()
+send_telegram("🔥 Dual Master Engine Online! Tracking CoinDCX & Delta Exchange simultaneously.")
 
-print("Master Terminal Online with Multi-Tier R:R Engine...")
-send_telegram("🔥 Broker Terminal Online!\nScalp (1:1.5-2) | Intraday (1:2-5) | Swing Runner (1:20) Active.", reply_markup=get_control_keyboard())
-
-# Main Scan Cycle
+# Main Engine Loop
 while True:
-    inr_bal, usdt_bal, _ = get_coindcx_balances()
-    for name, sym_cfg in SYMBOLS.items():
-        scan_symbol(name, sym_cfg, inr_bal, usdt_bal)
-        time.sleep(0.3)
-    time.sleep(2)
+    try:
+        c_inr, c_usdt = get_coindcx_balances()
+        d_usdt = get_delta_wallet_balance()
+        for name, sym_cfg in SYMBOLS.items():
+            scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt)
+            time.sleep(0.3)
+    except Exception as e:
+        print(f"Cycle error: {e}")
+    time.sleep(3)
