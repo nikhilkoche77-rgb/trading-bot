@@ -159,34 +159,54 @@ def delta_auth_request(method, endpoint, payload=""):
     except Exception as e:
         return False, {"error": str(e)}
 
-def get_delta_wallet_balance():
-    success, data = delta_auth_request("GET", "/v2/wallet/balances")
-    usdt_bal = 0.0
-    inr_bal = 0.0
-    if success and isinstance(data, dict):
-        result_items = data.get("result", [])
-        # Handle if result is a list or dict
-        if isinstance(result_items, list):
-            for asset in result_items:
-                sym = str(asset.get("asset_symbol", asset.get("currency", ""))).upper()
-                # Check all possible balance keys returned by Delta
-                avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
-                if sym in ["USDT", "USD"]:
-                    usdt_bal = max(usdt_bal, avail)
-                elif sym in ["INR", "INR_D"]:
-                    inr_bal = max(inr_bal, avail)
-        elif isinstance(result_items, dict):
-            for sym, asset in result_items.items():
-                if isinstance(asset, dict):
+def get_delta_wallet_balance_debug():
+    """Returns balance along with raw response for debugging"""
+    sec = str(DELTA_API_SECRET) if DELTA_API_SECRET else ""
+    if not sec:
+        return 0.0, 0.0, "Delta secret is empty"
+    try:
+        timestamp = str(int(time.time()))
+        endpoint = "/v2/wallet/balances"
+        method = "GET"
+        message = timestamp + method + endpoint + ""
+        signature = hmac.new(sec.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+        headers = {
+            "api-key": str(DELTA_API_KEY), "signature": signature,
+            "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
+        }
+        url = f"{DELTA_BASE_URL}{endpoint}"
+        res = SESSION.get(url, headers=headers, timeout=6)
+        raw_text = res.text
+        
+        if res.status_code != 200:
+            return 0.0, 0.0, f"HTTP {res.status_code}: {raw_text}"
+
+        data = res.json()
+        usdt_bal, inr_bal = 0.0, 0.0
+        if isinstance(data, dict):
+            result_items = data.get("result", [])
+            if isinstance(result_items, list):
+                for asset in result_items:
+                    sym = str(asset.get("asset_symbol", asset.get("currency", ""))).upper()
                     avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
-                else:
-                    avail = float(asset)
-                sym_upper = str(sym).upper()
-                if sym_upper in ["USDT", "USD"]:
-                    usdt_bal = max(usdt_bal, avail)
-                elif sym_upper in ["INR", "INR_D"]:
-                    inr_bal = max(inr_bal, avail)
-    return usdt_bal, inr_bal
+                    if sym in ["USDT", "USD"]:
+                        usdt_bal = max(usdt_bal, avail)
+                    elif sym in ["INR", "INR_D"]:
+                        inr_bal = max(inr_bal, avail)
+            elif isinstance(result_items, dict):
+                for sym, asset in result_items.items():
+                    if isinstance(asset, dict):
+                        avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
+                    else:
+                        avail = float(asset)
+                    sym_upper = str(sym).upper()
+                    if sym_upper in ["USDT", "USD"]:
+                        usdt_bal = max(usdt_bal, avail)
+                    elif sym_upper in ["INR", "INR_D"]:
+                        inr_bal = max(inr_bal, avail)
+        return usdt_bal, inr_bal, f"SUCCESS: {raw_text[:100]}"
+    except Exception as e:
+        return 0.0, 0.0, f"Exception: {str(e)}"
 
 def place_delta_order(product_symbol, side, size):
     payload = json.dumps({"product_symbol": product_symbol, "size": int(size), "side": side.lower(), "order_type": "market_order"})
@@ -317,22 +337,21 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
 # ==========================================
 def process_balance_request(sender_id):
     c_inr, c_usdt = get_coindcx_balances()
-    d_usdt, d_inr = get_delta_wallet_balance()
+    d_usdt, d_inr, debug_msg = get_delta_wallet_balance_debug()
     usdt_rate = get_usdt_inr_rate()
 
     coindcx_total = c_inr + (c_usdt * usdt_rate)
     delta_total = d_inr + (d_usdt * usdt_rate)
 
     msg = (
-        f"💰 *LIVE WALLETS AUDIT (IN INR)*\n\n"
+        f"💰 *LIVE WALLETS AUDIT (DEBUG)*\n\n"
         f"🇮🇳 *CoinDCX Wallet:*\n"
-        f"• Available INR: ₹{c_inr:.2f}\n"
-        f"• Available USDT: ${c_usdt:.2f} (~₹{c_usdt * usdt_rate:.2f})\n"
-        f"• *Total CoinDCX Value:* *₹{coindcx_total:.2f}*\n\n"
+        f"• Total Value: *₹{coindcx_total:.2f}*\n\n"
         f"🌐 *Delta Exchange India:*\n"
         f"• Available USDT: ${d_usdt:.2f} (~₹{d_usdt * usdt_rate:.2f})\n"
         f"• Available INR: ₹{d_inr:.2f}\n"
-        f"• *Total Delta Value:* *₹{delta_total:.2f}*"
+        f"• *Total Delta Value:* *₹{delta_total:.2f}*\n\n"
+        f"🛠️ *Delta Debug Response:*\n`{debug_msg}`"
     )
     send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
 
@@ -394,16 +413,15 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Dual Engine Online (Flexible Wallet Parser)*\n\n"
-    "• Delta India balance parser updated.\n"
-    "Neeche button dabakar balance check karein:",
+    "⚡ *Dual Engine Online (Debug Mode Active)*\n\n"
+    "• Wallets dabakar dekhein ki Delta server se kya exact response aa raha hai.",
     reply_markup=get_control_keyboard()
 )
 
 while True:
     try:
         c_inr, c_usdt = get_coindcx_balances()
-        d_usdt, _ = get_delta_wallet_balance()
+        d_usdt, _, _ = get_delta_wallet_balance_debug()
         for name, sym_cfg in SYMBOLS.items():
             scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt)
             time.sleep(0.3)
