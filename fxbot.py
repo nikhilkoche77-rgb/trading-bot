@@ -144,7 +144,6 @@ def delta_auth_request(method, endpoint, payload=""):
         return False, {"error": "Delta secret is empty"}
     try:
         timestamp = str(int(time.time()))
-        # FIXED: Delta signature strict format -> timestamp + method + endpoint + payload
         message = timestamp + method + endpoint + payload
         signature = hmac.new(sec.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
         headers = {
@@ -164,14 +163,29 @@ def get_delta_wallet_balance():
     success, data = delta_auth_request("GET", "/v2/wallet/balances")
     usdt_bal = 0.0
     inr_bal = 0.0
-    if success and isinstance(data, dict) and data.get("success"):
-        for asset in data.get("result", []):
-            sym = asset.get("asset_symbol", "").upper()
-            avail = float(asset.get("available_balance", 0.0))
-            if sym == "USDT":
-                usdt_bal = avail
-            elif sym in ["INR", "INR_D"]:
-                inr_bal = avail
+    if success and isinstance(data, dict):
+        result_items = data.get("result", [])
+        # Handle if result is a list or dict
+        if isinstance(result_items, list):
+            for asset in result_items:
+                sym = str(asset.get("asset_symbol", asset.get("currency", ""))).upper()
+                # Check all possible balance keys returned by Delta
+                avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
+                if sym in ["USDT", "USD"]:
+                    usdt_bal = max(usdt_bal, avail)
+                elif sym in ["INR", "INR_D"]:
+                    inr_bal = max(inr_bal, avail)
+        elif isinstance(result_items, dict):
+            for sym, asset in result_items.items():
+                if isinstance(asset, dict):
+                    avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
+                else:
+                    avail = float(asset)
+                sym_upper = str(sym).upper()
+                if sym_upper in ["USDT", "USD"]:
+                    usdt_bal = max(usdt_bal, avail)
+                elif sym_upper in ["INR", "INR_D"]:
+                    inr_bal = max(inr_bal, avail)
     return usdt_bal, inr_bal
 
 def place_delta_order(product_symbol, side, size):
@@ -309,10 +323,6 @@ def process_balance_request(sender_id):
     coindcx_total = c_inr + (c_usdt * usdt_rate)
     delta_total = d_inr + (d_usdt * usdt_rate)
 
-    inr_warning = ""
-    if d_inr > 0 and d_usdt < 1.0:
-        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakar *Convert to USDT* karein."
-
     msg = (
         f"💰 *LIVE WALLETS AUDIT (IN INR)*\n\n"
         f"🇮🇳 *CoinDCX Wallet:*\n"
@@ -322,7 +332,7 @@ def process_balance_request(sender_id):
         f"🌐 *Delta Exchange India:*\n"
         f"• Available USDT: ${d_usdt:.2f} (~₹{d_usdt * usdt_rate:.2f})\n"
         f"• Available INR: ₹{d_inr:.2f}\n"
-        f"• *Total Delta Value:* *₹{delta_total:.2f}*{inr_warning}"
+        f"• *Total Delta Value:* *₹{delta_total:.2f}*"
     )
     send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
 
@@ -384,8 +394,8 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Dual Engine Online (Signature Fixed)*\n\n"
-    "• Delta API Signature format corrected (`timestamp + method + path`).\n"
+    "⚡ *Dual Engine Online (Flexible Wallet Parser)*\n\n"
+    "• Delta India balance parser updated.\n"
     "Neeche button dabakar balance check karein:",
     reply_markup=get_control_keyboard()
 )
