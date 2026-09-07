@@ -19,10 +19,10 @@ ADMIN_CHAT_IDS = ["1345385952"]
 COINDCX_KEY = "3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409"
 COINDCX_SECRET = "b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e"
 
-# Delta Exchange India Correct Base URL
+# Delta Exchange India Credentials & Base URL
 DELTA_BASE_URL = "https://api.india.delta.exchange"
-DELTA_API_KEY = "r1WTKgfCXWiqKdIAB3CRCcRHierAlH"
-DELTA_API_SECRET = "3UdZpkij0jiEovXcJGKsx4rUpzYvulXVpUlbQCfCfGXnzfjB3zI1OVbJBlWP"
+DELTA_API_KEY = "v6itEa7m3KKFwtUsAssZ4pbNqz2glG"
+DELTA_API_SECRET = "DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq"
 
 DEFAULT_INTRADAY_RR = 3.0
 WEIGHT_ALLOCATION_PCT = 0.10
@@ -144,7 +144,8 @@ def delta_auth_request(method, endpoint, payload=""):
         return False, {"error": "Delta secret is empty"}
     try:
         timestamp = str(int(time.time()))
-        message = method + timestamp + endpoint + "" + payload
+        # FIXED: Delta signature strict format -> timestamp + method + endpoint + payload
+        message = timestamp + method + endpoint + payload
         signature = hmac.new(sec.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
         headers = {
             "api-key": str(DELTA_API_KEY), "signature": signature,
@@ -383,8 +384,8 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Dual Engine Online (Delta India API Updated)*\n\n"
-    "• Correct API endpoint `https://api.india.delta.exchange` configured.\n"
+    "⚡ *Dual Engine Online (Signature Fixed)*\n\n"
+    "• Delta API Signature format corrected (`timestamp + method + path`).\n"
     "Neeche button dabakar balance check karein:",
     reply_markup=get_control_keyboard()
 )
