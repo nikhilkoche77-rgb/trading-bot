@@ -4,12 +4,13 @@ import hashlib
 import json
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import requests
 import pandas as pd
 import numpy as np
 
 # ==========================================
-# 1. DIRECT CONFIGURATION
+# 1. DIRECT CONFIGURATION & CREDENTIALS
 # ==========================================
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = ["1345385952"]
@@ -32,6 +33,10 @@ MAX_PARALLEL_TRADES = 4
 STATE_FILE = "dual_trades_state.json"
 is_paused = False
 
+# Persistent fast connection session
+SESSION = requests.Session()
+EXECUTOR = ThreadPoolExecutor(max_workers=8)
+
 SYMBOLS = {
     "BTC/USDT": {"base": "USDT", "coindcx_pair": "B-BTC_USDT", "delta_symbol": "BTCUSD", "binance": "BTCUSDT", "step": 5, "p_dec": 2},
     "ETH/USDT": {"base": "USDT", "coindcx_pair": "B-ETH_USDT", "delta_symbol": "ETHUSD", "binance": "ETHUSDT", "step": 4, "p_dec": 2},
@@ -46,7 +51,51 @@ SYMBOLS = {
 }
 
 # ==========================================
-# 2. ZERO-CRASH SIGNATURE ENGINES
+# 2. INSTANT TELEGRAM UI
+# ==========================================
+def get_control_keyboard():
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Live Terminal", "callback_data": "cmd_status"},
+                {"text": "💰 Wallets", "callback_data": "cmd_balance"}
+            ],
+            [
+                {"text": "🔄 Refresh / Sync", "callback_data": "cmd_sync_now"},
+                {"text": "⏸️ Pause", "callback_data": "cmd_pause"},
+                {"text": "▶️ Resume", "callback_data": "cmd_resume"}
+            ],
+            [
+                {"text": "🚨 Panic Exit (Close All)", "callback_data": "cmd_panic"}
+            ]
+        ]
+    }
+    return json.dumps(keyboard)
+
+def send_telegram(message, chat_id=None, reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    recipients = [chat_id] if chat_id else ADMIN_CHAT_IDS
+    for cid in recipients:
+        payload = {"chat_id": cid, "text": message, "parse_mode": "Markdown"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            SESSION.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print(f"Telegram error: {e}")
+
+def answer_callback(cb_id, text=None):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
+        payload = {"callback_query_id": cb_id}
+        if text:
+            payload["text"] = text
+        SESSION.post(url, json=payload, timeout=3)
+    except Exception:
+        pass
+
+# ==========================================
+# 3. EXCHANGE API ENGINES
 # ==========================================
 def coindcx_auth_post(endpoint, body):
     sec = str(COINDCX_SECRET) if COINDCX_SECRET else ""
@@ -58,7 +107,7 @@ def coindcx_auth_post(endpoint, body):
         json_payload = json.dumps(body, separators=(',', ':'))
         signature = hmac.new(sec.encode('utf-8'), json_payload.encode('utf-8'), hashlib.sha256).hexdigest()
         headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': str(COINDCX_KEY), 'X-AUTH-SIGNATURE': signature}
-        res = requests.post(f"https://api.coindcx.com{endpoint}", data=json_payload, headers=headers, timeout=8)
+        res = SESSION.post(f"https://api.coindcx.com{endpoint}", data=json_payload, headers=headers, timeout=6)
         return res.status_code == 200, res.json()
     except Exception as e:
         return False, str(e)
@@ -92,9 +141,9 @@ def delta_auth_request(method, endpoint, payload=""):
         }
         url = f"{DELTA_BASE_URL}{endpoint}"
         if method == "GET":
-            res = requests.get(url, headers=headers, timeout=8)
+            res = SESSION.get(url, headers=headers, timeout=6)
         else:
-            res = requests.post(url, headers=headers, data=payload, timeout=8)
+            res = SESSION.post(url, headers=headers, data=payload, timeout=6)
         return res.status_code in [200, 201], res.json()
     except Exception as e:
         return False, {"error": str(e)}
@@ -114,33 +163,8 @@ def place_delta_order(product_symbol, side, size):
     return delta_auth_request("POST", "/v2/orders", payload=payload)
 
 # ==========================================
-# 3. BINANCE FEED & TRADING LOGIC
+# 4. STATE & CORE LOGIC
 # ==========================================
-def is_btc_healthy():
-    try:
-        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
-        resp = requests.get(url, timeout=4).json()
-        closes = [float(c[4]) for c in resp]
-        ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
-        drop_pct = ((closes[-1] - float(resp[-1][1])) / float(resp[-1][1])) * 100
-        return not (drop_pct < -0.85 or closes[-1] < ema20)
-    except Exception:
-        return True
-
-def check_binance_lead(symbol_binance):
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
-        resp = requests.get(url, timeout=4).json()
-        candles = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in resp]
-        df = pd.DataFrame(candles, columns=['open', 'high', 'low', 'close', 'volume'])
-        last = df.iloc[-1]
-        vol_avg = df['volume'].iloc[-6:-1].mean()
-        gain = ((last['close'] - last['open']) / last['open']) * 100
-        surge = last['volume'] > (vol_avg * 1.8)
-        return (gain >= 0.25 and surge), gain, df
-    except Exception:
-        return False, 0.0, None
-
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -159,13 +183,52 @@ def save_state(state):
 
 active_positions = load_state()
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    for cid in ADMIN_CHAT_IDS:
-        try:
-            requests.post(url, json={"chat_id": cid, "text": message}, timeout=8)
-        except Exception:
-            pass
+def is_btc_healthy():
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=25"
+        resp = SESSION.get(url, timeout=3).json()
+        closes = [float(c[4]) for c in resp]
+        ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
+        drop_pct = ((closes[-1] - float(resp[-1][1])) / float(resp[-1][1])) * 100
+        return not (drop_pct < -0.85 or closes[-1] < ema20)
+    except Exception:
+        return True
+
+def check_binance_lead(symbol_binance):
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol_binance}&interval=1m&limit=15"
+        resp = SESSION.get(url, timeout=3).json()
+        candles = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in resp]
+        df = pd.DataFrame(candles, columns=['open', 'high', 'low', 'close', 'volume'])
+        last = df.iloc[-1]
+        vol_avg = df['volume'].iloc[-6:-1].mean()
+        gain = ((last['close'] - last['open']) / last['open']) * 100
+        surge = last['volume'] > (vol_avg * 1.8)
+        return (gain >= 0.25 and surge), gain, df
+    except Exception:
+        return False, 0.0, None
+
+def generate_status_text():
+    pos_lines = []
+    for name, pos in active_positions.items():
+        if pos.get("side"):
+            pos_lines.append(f"• *{name}* | Entry: ${pos['entry']:.2f} | SL: ${pos['sl']:.2f} | TP: ${pos['tp']:.2f}")
+    if not pos_lines:
+        return "📊 *LIVE TERMINAL*\n\n💤 Koi active position open nahi hai. Market scan chal rahi hai."
+    return "📊 *ACTIVE POSITIONS:*\n\n" + "\n".join(pos_lines)
+
+def execute_dual_exit(name, sym_cfg, reason="EXIT"):
+    pos = active_positions[name]
+    if pos["coindcx_qty"] > 0:
+        place_coindcx_order(sym_cfg["coindcx_pair"], "sell", pos["coindcx_qty"])
+    if pos["delta_size"] > 0 and sym_cfg["delta_symbol"]:
+        place_delta_order(sym_cfg["delta_symbol"], "sell", pos["delta_size"])
+
+    send_telegram(f"🚨 *{reason}*\nClosed *{name}* on both CoinDCX & Delta!", reply_markup=get_control_keyboard())
+    pos["side"] = None
+    pos["coindcx_qty"] = 0.0
+    pos["delta_size"] = 0
+    save_state(active_positions)
 
 def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
     global is_paused
@@ -181,7 +244,16 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     curr_price = float(df['close'].iloc[-1])
 
-    if active_positions[name].get("side") is None and float(df['ema20'].iloc[-1]) > float(df['ema50'].iloc[-1]):
+    pos = active_positions[name]
+    if pos.get("side"):
+        if curr_price >= pos["tp"]:
+            execute_dual_exit(name, sym_cfg, reason="🎯 TARGET HIT")
+            return
+        elif curr_price <= pos["sl"]:
+            execute_dual_exit(name, sym_cfg, reason="🛑 STOP LOSS HIT")
+            return
+
+    if pos.get("side") is None and float(df['ema20'].iloc[-1]) > float(df['ema50'].iloc[-1]):
         sl = curr_price * 0.985
         tp = curr_price * 1.035
 
@@ -202,18 +274,98 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
             }
             save_state(active_positions)
             send_telegram(
-                f"⚡ PARALLEL TRADE OPENED\n\n"
-                f"Pair: {name}\n"
-                f"• CoinDCX Spot: {'✅ Filled' if cdcx_ok else '❌ Skipped'}\n"
-                f"• Delta Futures: {'✅ Filled' if delta_ok else '❌ Skipped'}\n"
-                f"Entry: ${curr_price:.{sym_cfg['p_dec']}f} | Target: ${tp:.{sym_cfg['p_dec']}f}"
+                f"⚡ *PARALLEL TRADE OPENED*\n\n"
+                f"Asset: `{name}`\n"
+                f"• CoinDCX: {'✅ ' + str(cdcx_qty) + ' Units' if cdcx_ok else '❌ Skipped'}\n"
+                f"• Delta: {'✅ ' + str(delta_contracts) + ' Contracts' if delta_ok else '❌ Skipped'}\n"
+                f"Entry: ${curr_price:.{sym_cfg['p_dec']}f} | TP: ${tp:.{sym_cfg['p_dec']}f} | SL: ${sl:.{sym_cfg['p_dec']}f}",
+                reply_markup=get_control_keyboard()
             )
 
-send_telegram("🔥 Zero-Crash Dual Engine Online! Live scanning CoinDCX & Delta Exchange.")
+# ==========================================
+# 5. ASYNC INSTANT WORKER FOR TELEGRAM
+# ==========================================
+def process_balance_request(sender_id):
+    c_inr, c_usdt = get_coindcx_balances()
+    d_usdt = get_delta_wallet_balance()
+    msg = (
+        f"💰 *LIVE WALLETS AUDIT*\n\n"
+        f"🇮🇳 *CoinDCX Wallet:*\n"
+        f"• Available INR: ₹{c_inr:.2f}\n"
+        f"• Available USDT: ${c_usdt:.2f}\n\n"
+        f"🌐 *Delta Exchange Wallet:*\n"
+        f"• Available USDT: *${d_usdt:.2f}* (~₹{d_usdt*90:.2f})"
+    )
+    send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
+
+def process_telegram_event(update):
+    global is_paused
+    # 1. Button Callback
+    if "callback_query" in update:
+        cb = update["callback_query"]
+        cb_id = cb["id"]
+        data = cb.get("data")
+        sender_id = str(cb["from"]["id"])
+
+        if sender_id in ADMIN_CHAT_IDS:
+            answer_callback(cb_id)  # Loader instant off
+
+            if data == "cmd_balance":
+                process_balance_request(sender_id)
+            elif data == "cmd_status":
+                send_telegram(generate_status_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
+            elif data == "cmd_sync_now":
+                send_telegram("🔄 *Sync Complete:* System live aur scan active hai.", chat_id=sender_id, reply_markup=get_control_keyboard())
+            elif data == "cmd_pause":
+                is_paused = True
+                send_telegram("⏸️ *Scanner Paused:* Naye orders nahi liye jayenge.", chat_id=sender_id, reply_markup=get_control_keyboard())
+            elif data == "cmd_resume":
+                is_paused = False
+                send_telegram("▶️ *Scanner Resumed:* Live parallel scan active ho gayi hai.", chat_id=sender_id, reply_markup=get_control_keyboard())
+            elif data == "cmd_panic":
+                for name, cfg in SYMBOLS.items():
+                    if active_positions[name].get("side"):
+                        execute_dual_exit(name, cfg, reason="🚨 PANIC EXIT")
+
+    # 2. Text Command Message
+    elif "message" in update and "text" in update["message"]:
+        msg_text = update["message"]["text"].lower().strip()
+        sender_id = str(update["message"]["chat"]["id"])
+
+        if sender_id in ADMIN_CHAT_IDS:
+            if any(cmd in msg_text for cmd in ["/balance", "/wallets", "wallet", "balance"]):
+                process_balance_request(sender_id)
+            elif any(cmd in msg_text for cmd in ["/status", "status", "terminal"]):
+                send_telegram(generate_status_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
+            else:
+                send_telegram("🎛️ *COMMAND TERMINAL ACTIVE*\nNeeche buttons se operate karein:", chat_id=sender_id, reply_markup=get_control_keyboard())
+
+def instant_telegram_listener():
+    last_id = 0
+    while True:
+        try:
+            # Long-poll with timeout=25 for immediate event push
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+            res = SESSION.get(url, params={"offset": last_id + 1, "timeout": 25}, timeout=30).json()
+            for update in res.get("result", []):
+                last_id = update["update_id"]
+                # Dispatch each incoming update to worker thread pool immediately
+                EXECUTOR.submit(process_telegram_event, update)
+        except Exception as e:
+            time.sleep(1)
 
 # ==========================================
-# 4. MAIN LOOP
+# 6. START BOT & LOOP
 # ==========================================
+threading.Thread(target=instant_telegram_listener, daemon=True).start()
+
+send_telegram(
+    "⚡ *Instant-Response Dual Engine Online!*\n\n"
+    "• CoinDCX (Spot) & Delta (Futures) Synced.\n"
+    "Button dabate hi instant reply aayega:",
+    reply_markup=get_control_keyboard()
+)
+
 while True:
     try:
         c_inr, c_usdt = get_coindcx_balances()
