@@ -11,19 +11,19 @@ import pandas as pd
 import numpy as np
 
 # ==========================================
-# 1. CONFIGURATION & KEYS
+# 1. CONFIGURATION & DIRECT KEYS
 # ==========================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw")
+TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = ["1345385952"]
 
-# CoinDCX Credentials
-COINDCX_KEY = os.getenv("3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409")
-COINDCX_SECRET = os.getenv("b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e")
+# CoinDCX Credentials (Direct Strings)
+COINDCX_KEY = "3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409"
+COINDCX_SECRET = "b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e"
 
-# Delta Exchange Credentials
-DELTA_BASE_URL = os.getenv("DELTA_BASE_URL", "https://api.delta.exchange")
-DELTA_API_KEY = os.getenv("v6itEa7m3KKFwtUsAssZ4pbNqz2glG")
-DELTA_API_SECRET = os.getenv("DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq")
+# Delta Exchange Credentials (Direct Strings)
+DELTA_BASE_URL = "https://api.delta.exchange"
+DELTA_API_KEY = "v6itEa7m3KKFwtUsAssZ4pbNqz2glG"
+DELTA_API_SECRET = "DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq"
 
 # Risk & Execution Parameters
 DEFAULT_SCALP_RR = 2.0
@@ -58,12 +58,12 @@ SYMBOLS = {
 # 2. COINDCX ENGINE (SPOT)
 # ==========================================
 def coindcx_auth_post(endpoint, body):
-    timeStamp = int(round(time.time() * 1000))
-    body["timestamp"] = timeStamp
-    json_payload = json.dumps(body, separators=(',', ':'))
-    signature = hmac.new(COINDCX_SECRET.encode(), json_payload.encode(), hashlib.sha256).hexdigest()
-    headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': COINDCX_KEY, 'X-AUTH-SIGNATURE': signature}
     try:
+        timeStamp = int(round(time.time() * 1000))
+        body["timestamp"] = timeStamp
+        json_payload = json.dumps(body, separators=(',', ':'))
+        signature = hmac.new(str(COINDCX_SECRET).encode('utf-8'), json_payload.encode('utf-8'), hashlib.sha256).hexdigest()
+        headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': str(COINDCX_KEY), 'X-AUTH-SIGNATURE': signature}
         res = requests.post(f"https://api.coindcx.com{endpoint}", data=json_payload, headers=headers, timeout=8)
         return res.status_code == 200, res.json()
     except Exception as e:
@@ -88,15 +88,15 @@ def place_coindcx_order(market_pair, side, quantity):
 # 3. DELTA EXCHANGE ENGINE (FUTURES)
 # ==========================================
 def delta_auth_request(method, endpoint, payload=""):
-    timestamp = str(int(time.time()))
-    message = method + timestamp + endpoint + "" + payload
-    signature = hmac.new(DELTA_API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
-    headers = {
-        "api-key": DELTA_API_KEY, "signature": signature,
-        "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
-    }
-    url = f"{DELTA_BASE_URL}{endpoint}"
     try:
+        timestamp = str(int(time.time()))
+        message = method + timestamp + endpoint + "" + payload
+        signature = hmac.new(str(DELTA_API_SECRET).encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+        headers = {
+            "api-key": str(DELTA_API_KEY), "signature": signature,
+            "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
+        }
+        url = f"{DELTA_BASE_URL}{endpoint}"
         if method == "GET":
             res = requests.get(url, headers=headers, timeout=8)
         else:
@@ -108,7 +108,7 @@ def delta_auth_request(method, endpoint, payload=""):
 def get_delta_wallet_balance():
     success, data = delta_auth_request("GET", "/v2/wallet/balances")
     usdt_bal = 0.0
-    if success and data.get("success"):
+    if success and isinstance(data, dict) and data.get("success"):
         for asset in data.get("result", []):
             if asset.get("asset_symbol") == "USDT":
                 usdt_bal = float(asset.get("available_balance", 0.0))
@@ -182,10 +182,8 @@ active_positions = load_state()
 
 def execute_dual_exit(name, sym_cfg, reason="EXIT"):
     pos = active_positions[name]
-    # Exit CoinDCX Spot
     if pos["coindcx_qty"] > 0:
         place_coindcx_order(sym_cfg["coindcx_pair"], "sell", pos["coindcx_qty"])
-    # Exit Delta Futures
     if pos["delta_size"] > 0 and sym_cfg["delta_symbol"]:
         place_delta_order(sym_cfg["delta_symbol"], "sell", pos["delta_size"])
 
@@ -201,7 +199,6 @@ def manage_trailing(name, sym_cfg, curr_price):
         return
 
     risk_dist = abs(pos["entry"] - pos["sl"])
-    profit_dist = curr_price - pos["entry"]
 
     # 1:1 Breakeven Lock
     if curr_price >= (pos["entry"] + risk_dist) and pos["sl"] < pos["entry"]:
@@ -209,13 +206,10 @@ def manage_trailing(name, sym_cfg, curr_price):
         save_state(active_positions)
         send_telegram(f"🛡️ DUAL BREAKEVEN LOCKED: {name} SL cost par shift ho gaya.")
 
-    # Target Hit
     if curr_price >= pos["tp"]:
         execute_dual_exit(name, sym_cfg, reason="🎯 TARGET HIT")
-    # SL Hit
     elif curr_price <= pos["sl"]:
         execute_dual_exit(name, sym_cfg, reason="🛑 STOP LOSS HIT")
-    # Dynamic Trail
     elif curr_price > pos["best_price"]:
         pos["best_price"] = curr_price
         new_sl = curr_price - (pos["atr"] * 1.5)
@@ -245,16 +239,15 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
         sl = curr_price - (atr_val * 1.5)
         tp = curr_price + (abs(curr_price - sl) * DEFAULT_INTRADAY_RR)
 
-        # 1. CoinDCX Allocation
+        # CoinDCX Sizing
         coindcx_alloc = max(MIN_TRADE_INR if sym_cfg["base"] == "INR" else MIN_TRADE_USDT, 
                             (c_inr if sym_cfg["base"] == "INR" else c_usdt) * WEIGHT_ALLOCATION_PCT)
         cdcx_qty = round(coindcx_alloc / curr_price, sym_cfg["step"]) if sym_cfg["step"] > 0 else int(coindcx_alloc / curr_price)
 
-        # 2. Delta Allocation
+        # Delta Sizing
         delta_alloc = max(MIN_TRADE_USDT, min(d_usdt * WEIGHT_ALLOCATION_PCT, MAX_TRADE_USDT))
         delta_contracts = max(1, int(delta_alloc / 1.0)) if sym_cfg["delta_symbol"] else 0
 
-        # Parallel Execution
         cdcx_ok, _ = place_coindcx_order(sym_cfg["coindcx_pair"], "buy", cdcx_qty) if cdcx_qty > 0 else (False, None)
         delta_ok, _ = place_delta_order(sym_cfg["delta_symbol"], "buy", delta_contracts) if delta_contracts > 0 else (False, None)
 
