@@ -57,7 +57,7 @@ def get_control_keyboard():
         "inline_keyboard": [
             [
                 {"text": "📊 Live Terminal", "callback_data": "cmd_status"},
-                {"text": "💰 Wallets", "callback_data": "cmd_balance"}
+                {"text": "💰 Wallets (INR)", "callback_data": "cmd_balance"}
             ],
             [
                 {"text": "🔄 Refresh / Sync", "callback_data": "cmd_sync_now"},
@@ -94,8 +94,20 @@ def answer_callback(cb_id, text=None):
         pass
 
 # ==========================================
-# 3. EXCHANGE API ENGINES
+# 3. EXCHANGE API ENGINES & LIVE RATES
 # ==========================================
+def get_usdt_inr_rate():
+    try:
+        url = "https://api.coindcx.com/exchange/ticker"
+        res = SESSION.get(url, timeout=4).json()
+        if isinstance(res, list):
+            for t in res:
+                if t.get("market") == "USDTINR":
+                    return float(t.get("last_price", 90.0))
+    except Exception:
+        pass
+    return 90.0
+
 def coindcx_auth_post(endpoint, body):
     sec = str(COINDCX_SECRET) if COINDCX_SECRET else ""
     if not sec:
@@ -148,7 +160,6 @@ def delta_auth_request(method, endpoint, payload=""):
         return False, {"error": str(e)}
 
 def get_delta_wallet_balance():
-    """Delta India ke USDT aur INR dono balances check karta hai"""
     success, data = delta_auth_request("GET", "/v2/wallet/balances")
     usdt_bal = 0.0
     inr_bal = 0.0
@@ -292,19 +303,25 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
 def process_balance_request(sender_id):
     c_inr, c_usdt = get_coindcx_balances()
     d_usdt, d_inr = get_delta_wallet_balance()
+    usdt_rate = get_usdt_inr_rate()
+
+    coindcx_total = c_inr + (c_usdt * usdt_rate)
+    delta_total = d_inr + (d_usdt * usdt_rate)
 
     inr_warning = ""
     if d_inr > 0 and d_usdt < 1.0:
-        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakar *Convert to USDT* karein taaki bot futures trade laga sake."
+        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakار *Convert to USDT* karein."
 
     msg = (
-        f"💰 *LIVE WALLETS AUDIT*\n\n"
+        f"💰 *LIVE WALLETS AUDIT (IN INR)*\n\n"
         f"🇮🇳 *CoinDCX Wallet:*\n"
         f"• Available INR: ₹{c_inr:.2f}\n"
-        f"• Available USDT: ${c_usdt:.2f}\n\n"
+        f"• Available USDT: ${c_usdt:.2f} (~₹{c_usdt * usdt_rate:.2f})\n"
+        f"• *Total CoinDCX Value:* *₹{coindcx_total:.2f}*\n\n"
         f"🌐 *Delta Exchange India:*\n"
-        f"• Available USDT: *${d_usdt:.2f}*\n"
-        f"• Unconverted INR: *₹{d_inr:.2f}*{inr_warning}"
+        f"• Available USDT: ${d_usdt:.2f} (~₹{d_usdt * usdt_rate:.2f})\n"
+        f"• Available INR: ₹{d_inr:.2f}\n"
+        f"• *Total Delta Value:* *₹{delta_total:.2f}*{inr_warning}"
     )
     send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
 
@@ -366,9 +383,9 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Delta India & CoinDCX Dual Engine Online!*\n\n"
-    "• Delta India Gateway (`cdn.india.delta.exchange`) Synced.\n"
-    "Neeche buttons se wallet balance verify karein:",
+    "⚡ *Dual Engine Online (INR View Active)*\n\n"
+    "• Wallets audit ab direct Indian Rupees (₹) mein dikhega.\n"
+    "Neeche button dabakar check karein:",
     reply_markup=get_control_keyboard()
 )
 
