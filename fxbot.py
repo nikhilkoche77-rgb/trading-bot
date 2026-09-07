@@ -138,29 +138,7 @@ def place_coindcx_order(market_pair, side, quantity):
     body = {"side": side.lower(), "order_type": "market_order", "market": market_pair, "total_quantity": quantity}
     return coindcx_auth_post("/exchange/v1/orders/create", body)
 
-def delta_auth_request(method, endpoint, payload=""):
-    sec = str(DELTA_API_SECRET) if DELTA_API_SECRET else ""
-    if not sec:
-        return False, {"error": "Delta secret is empty"}
-    try:
-        timestamp = str(int(time.time()))
-        message = timestamp + method + endpoint + payload
-        signature = hmac.new(sec.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
-        headers = {
-            "api-key": str(DELTA_API_KEY), "signature": signature,
-            "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
-        }
-        url = f"{DELTA_BASE_URL}{endpoint}"
-        if method == "GET":
-            res = SESSION.get(url, headers=headers, timeout=6)
-        else:
-            res = SESSION.post(url, headers=headers, data=payload, timeout=6)
-        return res.status_code in [200, 201], res.json()
-    except Exception as e:
-        return False, {"error": str(e)}
-
 def get_delta_wallet_balance_debug():
-    """Returns balance along with raw response for debugging"""
     sec = str(DELTA_API_SECRET) if DELTA_API_SECRET else ""
     if not sec:
         return 0.0, 0.0, "Delta secret is empty"
@@ -193,24 +171,26 @@ def get_delta_wallet_balance_debug():
                         usdt_bal = max(usdt_bal, avail)
                     elif sym in ["INR", "INR_D"]:
                         inr_bal = max(inr_bal, avail)
-            elif isinstance(result_items, dict):
-                for sym, asset in result_items.items():
-                    if isinstance(asset, dict):
-                        avail = float(asset.get("available_balance", asset.get("balance", asset.get("equity", 0.0))))
-                    else:
-                        avail = float(asset)
-                    sym_upper = str(sym).upper()
-                    if sym_upper in ["USDT", "USD"]:
-                        usdt_bal = max(usdt_bal, avail)
-                    elif sym_upper in ["INR", "INR_D"]:
-                        inr_bal = max(inr_bal, avail)
         return usdt_bal, inr_bal, f"SUCCESS: {raw_text[:100]}"
     except Exception as e:
         return 0.0, 0.0, f"Exception: {str(e)}"
 
 def place_delta_order(product_symbol, side, size):
+    timestamp = str(int(time.time()))
+    endpoint = "/v2/orders"
+    method = "POST"
     payload = json.dumps({"product_symbol": product_symbol, "size": int(size), "side": side.lower(), "order_type": "market_order"})
-    return delta_auth_request("POST", "/v2/orders", payload=payload)
+    message = timestamp + method + endpoint + payload
+    signature = hmac.new(str(DELTA_API_SECRET).encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+    headers = {
+        "api-key": str(DELTA_API_KEY), "signature": signature,
+        "timestamp": timestamp, "Content-Type": "application/json", "User-Agent": "dual-bot"
+    }
+    try:
+        res = SESSION.post(f"{DELTA_BASE_URL}{endpoint}", headers=headers, data=payload, timeout=6)
+        return res.status_code in [200, 201], res.json()
+    except Exception as e:
+        return False, {"error": str(e)}
 
 # ==========================================
 # 4. STATE & CORE LOGIC
@@ -344,14 +324,14 @@ def process_balance_request(sender_id):
     delta_total = d_inr + (d_usdt * usdt_rate)
 
     msg = (
-        f"💰 *LIVE WALLETS AUDIT (DEBUG)*\n\n"
+        f"💰 *LIVE WALLETS AUDIT (CHECK IP)*\n\n"
         f"🇮🇳 *CoinDCX Wallet:*\n"
         f"• Total Value: *₹{coindcx_total:.2f}*\n\n"
         f"🌐 *Delta Exchange India:*\n"
         f"• Available USDT: ${d_usdt:.2f} (~₹{d_usdt * usdt_rate:.2f})\n"
         f"• Available INR: ₹{d_inr:.2f}\n"
         f"• *Total Delta Value:* *₹{delta_total:.2f}*\n\n"
-        f"🛠️ *Delta Debug Response:*\n`{debug_msg}`"
+        f"🛠️ *Exact Delta Response:*\n`{debug_msg}`"
     )
     send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
 
@@ -413,8 +393,8 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Dual Engine Online (Debug Mode Active)*\n\n"
-    "• Wallets dabakar dekhein ki Delta server se kya exact response aa raha hai.",
+    "⚡ *IP Diagnostic Mode Active*\n\n"
+    "• Wallets dabakar dekhein ki ab error mein kaun sa exact IP show ho raha hai.",
     reply_markup=get_control_keyboard()
 )
 
