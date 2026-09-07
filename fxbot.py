@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 # ==========================================
-# 1. DIRECT CONFIGURATION & CREDENTIALS
+# 1. CREDENTIALS & DIRECT CONFIGURATION
 # ==========================================
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = ["1345385952"]
@@ -19,8 +19,8 @@ ADMIN_CHAT_IDS = ["1345385952"]
 COINDCX_KEY = "3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409"
 COINDCX_SECRET = "b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e"
 
-# Delta Exchange Credentials
-DELTA_BASE_URL = "https://api.delta.exchange"
+# Delta Exchange India Credentials & Base URL
+DELTA_BASE_URL = "https://cdn.india.delta.exchange"
 DELTA_API_KEY = "v6itEa7m3KKFwtUsAssZ4pbNqz2glG"
 DELTA_API_SECRET = "DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq"
 
@@ -33,7 +33,6 @@ MAX_PARALLEL_TRADES = 4
 STATE_FILE = "dual_trades_state.json"
 is_paused = False
 
-# Persistent fast connection session
 SESSION = requests.Session()
 EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
@@ -149,14 +148,19 @@ def delta_auth_request(method, endpoint, payload=""):
         return False, {"error": str(e)}
 
 def get_delta_wallet_balance():
+    """Delta India ke USDT aur INR dono balances check karta hai"""
     success, data = delta_auth_request("GET", "/v2/wallet/balances")
     usdt_bal = 0.0
+    inr_bal = 0.0
     if success and isinstance(data, dict) and data.get("success"):
         for asset in data.get("result", []):
-            if asset.get("asset_symbol") == "USDT":
-                usdt_bal = float(asset.get("available_balance", 0.0))
-                break
-    return usdt_bal
+            sym = asset.get("asset_symbol", "").upper()
+            avail = float(asset.get("available_balance", 0.0))
+            if sym == "USDT":
+                usdt_bal = avail
+            elif sym in ["INR", "INR_D"]:
+                inr_bal = avail
+    return usdt_bal, inr_bal
 
 def place_delta_order(product_symbol, side, size):
     payload = json.dumps({"product_symbol": product_symbol, "size": int(size), "side": side.lower(), "order_type": "market_order"})
@@ -263,7 +267,7 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
         delta_contracts = max(1, int(MIN_TRADE_USDT / 1.0)) if sym_cfg["delta_symbol"] else 0
 
         cdcx_ok, _ = place_coindcx_order(sym_cfg["coindcx_pair"], "buy", cdcx_qty) if cdcx_qty > 0 else (False, None)
-        delta_ok, _ = place_delta_order(sym_cfg["delta_symbol"], "buy", delta_contracts) if delta_contracts > 0 else (False, None)
+        delta_ok, _ = place_delta_order(sym_cfg["delta_symbol"], "buy", delta_contracts) if (delta_contracts > 0 and d_usdt >= MIN_TRADE_USDT) else (False, None)
 
         if cdcx_ok or delta_ok:
             active_positions[name] = {
@@ -287,20 +291,25 @@ def scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt):
 # ==========================================
 def process_balance_request(sender_id):
     c_inr, c_usdt = get_coindcx_balances()
-    d_usdt = get_delta_wallet_balance()
+    d_usdt, d_inr = get_delta_wallet_balance()
+
+    inr_warning = ""
+    if d_inr > 0 and d_usdt < 1.0:
+        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakar *Convert to USDT* karein taaki bot futures trade laga sake."
+
     msg = (
         f"💰 *LIVE WALLETS AUDIT*\n\n"
         f"🇮🇳 *CoinDCX Wallet:*\n"
         f"• Available INR: ₹{c_inr:.2f}\n"
         f"• Available USDT: ${c_usdt:.2f}\n\n"
-        f"🌐 *Delta Exchange Wallet:*\n"
-        f"• Available USDT: *${d_usdt:.2f}* (~₹{d_usdt*90:.2f})"
+        f"🌐 *Delta Exchange India:*\n"
+        f"• Available USDT: *${d_usdt:.2f}*\n"
+        f"• Unconverted INR: *₹{d_inr:.2f}*{inr_warning}"
     )
     send_telegram(msg, chat_id=sender_id, reply_markup=get_control_keyboard())
 
 def process_telegram_event(update):
     global is_paused
-    # 1. Button Callback
     if "callback_query" in update:
         cb = update["callback_query"]
         cb_id = cb["id"]
@@ -308,7 +317,7 @@ def process_telegram_event(update):
         sender_id = str(cb["from"]["id"])
 
         if sender_id in ADMIN_CHAT_IDS:
-            answer_callback(cb_id)  # Loader instant off
+            answer_callback(cb_id)
 
             if data == "cmd_balance":
                 process_balance_request(sender_id)
@@ -327,7 +336,6 @@ def process_telegram_event(update):
                     if active_positions[name].get("side"):
                         execute_dual_exit(name, cfg, reason="🚨 PANIC EXIT")
 
-    # 2. Text Command Message
     elif "message" in update and "text" in update["message"]:
         msg_text = update["message"]["text"].lower().strip()
         sender_id = str(update["message"]["chat"]["id"])
@@ -344,14 +352,12 @@ def instant_telegram_listener():
     last_id = 0
     while True:
         try:
-            # Long-poll with timeout=25 for immediate event push
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
             res = SESSION.get(url, params={"offset": last_id + 1, "timeout": 25}, timeout=30).json()
             for update in res.get("result", []):
                 last_id = update["update_id"]
-                # Dispatch each incoming update to worker thread pool immediately
                 EXECUTOR.submit(process_telegram_event, update)
-        except Exception as e:
+        except Exception:
             time.sleep(1)
 
 # ==========================================
@@ -360,16 +366,16 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Instant-Response Dual Engine Online!*\n\n"
-    "• CoinDCX (Spot) & Delta (Futures) Synced.\n"
-    "Button dabate hi instant reply aayega:",
+    "⚡ *Delta India & CoinDCX Dual Engine Online!*\n\n"
+    "• Delta India Gateway (`cdn.india.delta.exchange`) Synced.\n"
+    "Neeche buttons se wallet balance verify karein:",
     reply_markup=get_control_keyboard()
 )
 
 while True:
     try:
         c_inr, c_usdt = get_coindcx_balances()
-        d_usdt = get_delta_wallet_balance()
+        d_usdt, _ = get_delta_wallet_balance()
         for name, sym_cfg in SYMBOLS.items():
             scan_symbol(name, sym_cfg, c_inr, c_usdt, d_usdt)
             time.sleep(0.3)
