@@ -19,8 +19,8 @@ ADMIN_CHAT_IDS = ["1345385952"]
 COINDCX_KEY = "3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409"
 COINDCX_SECRET = "b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e"
 
-# Delta Exchange India Credentials & Base URL
-DELTA_BASE_URL = "https://cdn.india.delta.exchange"
+# Delta Exchange India Correct Base URL
+DELTA_BASE_URL = "https://api.india.delta.exchange"
 DELTA_API_KEY = "v6itEa7m3KKFwtUsAssZ4pbNqz2glG"
 DELTA_API_SECRET = "DPzw2N590faaifL7MhHv2atWz9AljAdtu6GyhXkCx1HdNxJso3zER8Pomkkq"
 
@@ -310,7 +310,7 @@ def process_balance_request(sender_id):
 
     inr_warning = ""
     if d_inr > 0 and d_usdt < 1.0:
-        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakار *Convert to USDT* karein."
+        inr_warning = "\n⚠️ *Delta Note:* Aapka balance INR me hai. App me jakar *Convert to USDT* karein."
 
     msg = (
         f"💰 *LIVE WALLETS AUDIT (IN INR)*\n\n"
@@ -383,9 +383,9 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *Dual Engine Online (INR View Active)*\n\n"
-    "• Wallets audit ab direct Indian Rupees (₹) mein dikhega.\n"
-    "Neeche button dabakar check karein:",
+    "⚡ *Dual Engine Online (Delta India API Updated)*\n\n"
+    "• Correct API endpoint `https://api.india.delta.exchange` configured.\n"
+    "Neeche button dabakar balance check karein:",
     reply_markup=get_control_keyboard()
 )
 
