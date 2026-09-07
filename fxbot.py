@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 # ==========================================
-# 1. CREDENTIALS & CONFIGURATION (COINDCX ONLY)
+# 1. CREDENTIALS & TARGET CONFIGURATION (₹500/DAY TARGET)
 # ==========================================
 TELEGRAM_TOKEN = "8991028193:AAGzmceXw5nsDjHS25D_oboo-bnbr2vvmzw"
 ADMIN_CHAT_IDS = ["1345385952"]
@@ -20,10 +20,10 @@ COINDCX_KEY = "3f4885d2c69c367379c14d146ef67da9743ea6fb92e23409"
 COINDCX_SECRET = "b3e23b4021ef0445793ef36ba4b0359a58727d25f7e1aae65f4406df129fda5e"
 
 DEFAULT_INTRADAY_RR = 3.0
-WEIGHT_ALLOCATION_PCT = 0.10
+WEIGHT_ALLOCATION_PCT = 0.40  # 40% allocation to scale up profits towards ₹500/day goal
 MIN_TRADE_INR = 100.0
 MAX_PARALLEL_TRADES = 4
-STATE_FILE = "coindcx_only_state.json"
+STATE_FILE = "coindcx_target_state.json"
 is_paused = False
 
 SESSION = requests.Session()
@@ -167,8 +167,8 @@ def generate_status_text():
         if pos.get("side"):
             pos_lines.append(f"• *{name}* | Qty: {pos['coindcx_qty']} | Entry: ₹{pos['entry']:.2f} | TP: ₹{pos['tp']:.2f}")
     if not pos_lines:
-        return "📊 *COINDCX LIVE TERMINAL*\n\n💤 Koi active position open nahi hai. Market scan chal rahi hai."
-    return "📊 *ACTIVE COINDCX POSITIONS:*\n\n" + "\n".join(pos_lines)
+        return "📊 *COINDCX TARGET TERMINAL (₹500/Day)*\n\n💤 Market scan active hai..."
+    return "📊 *ACTIVE POSITIONS:*\n\n" + "\n".join(pos_lines)
 
 def execute_coindcx_exit(name, sym_cfg, reason="EXIT"):
     pos = active_positions[name]
@@ -199,7 +199,7 @@ def scan_symbol(name, sym_cfg, c_inr):
     pos = active_positions[name]
     if pos.get("side"):
         if curr_price >= pos["tp"]:
-            execute_coindcx_exit(name, sym_cfg, reason="🎯 TARGET HIT")
+            execute_coindcx_exit(name, sym_cfg, reason="🎯 TARGET HIT (Profit Booked)")
             return
         elif curr_price <= pos["sl"]:
             execute_coindcx_exit(name, sym_cfg, reason="🛑 STOP LOSS HIT")
@@ -221,7 +221,7 @@ def scan_symbol(name, sym_cfg, c_inr):
             }
             save_state(active_positions)
             send_telegram(
-                f"⚡ *COINDCX TRADE OPENED*\n\n"
+                f"⚡ *TARGET-FOCUSED TRADE OPENED*\n\n"
                 f"Asset: `{name}`\n"
                 f"• Qty: {cdcx_qty} Units\n"
                 f"Entry: ₹{curr_price:.{sym_cfg['p_dec']}f} | TP: ₹{tp:.{sym_cfg['p_dec']}f} | SL: ₹{sl:.{sym_cfg['p_dec']}f}",
@@ -260,7 +260,7 @@ def process_telegram_event(update):
             elif data == "cmd_status":
                 send_telegram(generate_status_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
             elif data == "cmd_sync_now":
-                send_telegram("🔄 *Sync Complete:* CoinDCX scanner live active hai.", chat_id=sender_id, reply_markup=get_control_keyboard())
+                send_telegram("🔄 *Sync Complete:* Bot live active hai.", chat_id=sender_id, reply_markup=get_control_keyboard())
             elif data == "cmd_pause":
                 is_paused = True
                 send_telegram("⏸️ *Scanner Paused.*", chat_id=sender_id, reply_markup=get_control_keyboard())
@@ -282,7 +282,7 @@ def process_telegram_event(update):
             elif any(cmd in msg_text for cmd in ["/status", "status", "terminal"]):
                 send_telegram(generate_status_text(), chat_id=sender_id, reply_markup=get_control_keyboard())
             else:
-                send_telegram("🎛️ *COINDCX BOT TERMINAL*\nUse buttons below:", chat_id=sender_id, reply_markup=get_control_keyboard())
+                send_telegram("🎛️ *TARGET BOT TERMINAL*\nUse buttons below:", chat_id=sender_id, reply_markup=get_control_keyboard())
 
 def instant_telegram_listener():
     last_id = 0
@@ -302,8 +302,8 @@ def instant_telegram_listener():
 threading.Thread(target=instant_telegram_listener, daemon=True).start()
 
 send_telegram(
-    "⚡ *CoinDCX Bot Online*\n\n"
-    "• Successfully running on CoinDCX INR pairs.",
+    "⚡ *CoinDCX Target Bot Online (₹500 Goal)*\n\n"
+    "• High allocation mode active for INR pairs.",
     reply_markup=get_control_keyboard()
 )
 
